@@ -37,7 +37,7 @@
 
 #include "adiv5.h"
 
-int remote_init(bool verbose)
+int remote_init(void)
 {
 	char construct[REMOTE_MAX_MSG_SIZE];
 	int c = snprintf(construct, REMOTE_MAX_MSG_SIZE, "%s", REMOTE_START_STR);
@@ -49,9 +49,7 @@ int remote_init(bool verbose)
 				c ? (char *)&(construct[1]) : "unknown");
       return -1;
     }
-	if (verbose)
-		DEBUG_WARN("Remote is %s\n", &construct[1]);
-        return 0;
+	return 0;
 }
 
 bool remote_target_get_power(void)
@@ -127,6 +125,42 @@ bool remote_srst_get_val(void)
       exit(-1);
     }
 	return (construct[1] == '1');
+}
+
+void remote_max_frequency_set(uint32_t freq)
+{
+	uint8_t construct[REMOTE_MAX_MSG_SIZE];
+	int s;
+	s = snprintf((char *)construct, REMOTE_MAX_MSG_SIZE, REMOTE_FREQ_SET_STR,
+				 freq);
+	platform_buffer_write(construct, s);
+
+	s = platform_buffer_read(construct, REMOTE_MAX_MSG_SIZE);
+
+	if ((!s) || (construct[0] == REMOTE_RESP_ERR)) {
+		DEBUG_WARN("Update Firmware to allow to set max SWJ frequency\n");
+    }
+}
+
+uint32_t remote_max_frequency_get(void)
+{
+	uint8_t construct[REMOTE_MAX_MSG_SIZE];
+	int s;
+
+	s = snprintf((char *)construct, REMOTE_MAX_MSG_SIZE,"%s",
+				 REMOTE_FREQ_GET_STR);
+	platform_buffer_write(construct, s);
+
+	s = platform_buffer_read(construct, REMOTE_MAX_MSG_SIZE);
+
+	if ((!s) || (construct[0] == REMOTE_RESP_ERR)) {
+		DEBUG_WARN("platform_freq_get failed, error %s\n",
+				   s ? (char *)&(construct[1]) : "unknown");
+      exit(-1);
+    }
+	uint32_t freq[1];
+	unhexify(freq, (const char*)&construct[1], 4);
+	return freq[0];
 }
 
 const char *remote_target_voltage(void)

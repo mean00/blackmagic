@@ -37,6 +37,8 @@
 #include "platform.h"
 #include "platform_support.h"
 
+extern uint32_t delay_cnt;
+
 enum BMP_DEBUG {
 	BMP_DEBUG_NONE   =  0,
 	BMP_DEBUG_INFO   =  1,
