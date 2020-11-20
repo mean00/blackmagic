@@ -114,6 +114,8 @@ const char *libftdi_target_voltage(void);
 void libftdi_jtagtap_tdi_tdo_seq(
 	uint8_t *DO, const uint8_t final_tms, const uint8_t *DI, int ticks);
 bool  libftdi_swd_possible(bool *do_mpsse, bool *direct_bb_swd);
+void libftdi_max_frequency_set(uint32_t freq);
+uint32_t libftdi_max_frequency_get(void);
 
 #define MPSSE_SK 1
 #define PIN0     1

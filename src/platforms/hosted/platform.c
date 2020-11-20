@@ -542,6 +542,9 @@ void platform_max_frequency_set(uint32_t freq)
 	case BMP_TYPE_CMSIS_DAP:
 		dap_swj_clock(freq);
 		break;
+	case BMP_TYPE_LIBFTDI:
+		libftdi_max_frequency_set(freq);
+		break;
 	default:
 		DEBUG_WARN("Setting max SWJ frequency not yet implemented\n");
 		break;
@@ -556,6 +559,8 @@ uint32_t platform_max_frequency_get(void)
 	case BMP_TYPE_CMSIS_DAP:
 		return dap_swj_clock(0);
 		break;
+	case BMP_TYPE_LIBFTDI:
+		return libftdi_max_frequency_get();
 	default:
 		DEBUG_WARN("Reading max SWJ frequency not yet implemented\n");
 		break;
