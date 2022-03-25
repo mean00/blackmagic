@@ -472,70 +472,79 @@ handle_q_packet(char *packet, int len)
 	gdb_putpacket("", 0);
 }
 
-static void
-handle_v_packet(char *packet, int plen)
+static uint8_t flash_mode = 0;
+static void exec_v_attachd(const char *packet, int len) 
 {
-	unsigned long addr, len;
-	int bin;
-	static uint8_t flash_mode = 0;
-
-	if (sscanf(packet, "vAttach;%08lx", &addr) == 1) {
-		/* Attach to remote target processor */
-		cur_target = target_attach_n(addr, &gdb_controller);
-		if(cur_target) {
-			morse(NULL, false);
-			gdb_putpacketz("T05");
-		} else
-			gdb_putpacketz("E01");
-
-	} else if (!strncmp(packet, "vRun", 4)) {
-		/* Parse command line for get_cmdline semihosting call */
-		char cmdline[83];
-		char *pcmdline = cmdline;
-		char *tok = packet + 4;
-		if (*tok == ';') tok++;
-		*cmdline='\0';
-		while(*tok != '\0') {
-			if(strlen(cmdline)+3 >= sizeof(cmdline)) break;
-			if (*tok == ';') {
-				*pcmdline++=' ';
-				*pcmdline='\0';
-				tok++;
-				continue;
-			}
-			if (isxdigit(*tok) && isxdigit(*(tok+1))) {
-				unhexify(pcmdline, tok, 2);
-				if ((*pcmdline == ' ') || (*pcmdline == '\\')) {
-					*(pcmdline+1)=*pcmdline;
-					*pcmdline++='\\';
-				}
-				pcmdline++;
-				tok+=2;
-				*pcmdline='\0';
-				continue;
-			}
-			break;
+	unsigned long addr;
+	(void)len;
+	if(sscanf(packet, ";%08lx", &addr) != 1)
+	{
+		DEBUG_GDB("*** malformed vAttached packet: %s\n", packet);
+		gdb_putpacket("", 0);
+	}
+	/* Attach to remote target processor */
+	cur_target = target_attach_n(addr, &gdb_controller);
+	if(cur_target) {
+		morse(NULL, false);
+		gdb_putpacketz("T05");
+	} else
+		gdb_putpacketz("E01");
+}
+static void exec_v_run(const char *packet, int len) 
+{
+	(void)len;
+	/* Parse command line for get_cmdline semihosting call */
+	char cmdline[83];
+	char *pcmdline = cmdline;
+	const char *tok = packet;
+	if (*tok == ';') tok++;
+	*cmdline='\0';
+	while(*tok != '\0') {
+		if(strlen(cmdline)+3 >= sizeof(cmdline)) break;
+		if (*tok == ';') {
+			*pcmdline++=' ';
+			*pcmdline='\0';
+			tok++;
+			continue;
 		}
-		/* Run target program. For us (embedded) this means reset. */
-		if(cur_target) {
+		if (isxdigit(*tok) && isxdigit(*(tok+1))) {
+			unhexify(pcmdline, tok, 2);
+			if ((*pcmdline == ' ') || (*pcmdline == '\\')) {
+				*(pcmdline+1)=*pcmdline;
+				*pcmdline++='\\';
+			}
+			pcmdline++;
+			tok+=2;
+			*pcmdline='\0';
+			continue;
+		}
+		break;
+	}
+	/* Run target program. For us (embedded) this means reset. */
+	if(cur_target) {
+		target_set_cmdline(cur_target, cmdline);
+		target_reset(cur_target);
+		gdb_putpacketz("T05");
+	} else if(last_target) {
+		cur_target = target_attach(last_target,
+					   &gdb_controller);
+
+		/* If we were able to attach to the target again */
+		if (cur_target) {
 			target_set_cmdline(cur_target, cmdline);
 			target_reset(cur_target);
+			morse(NULL, false);
 			gdb_putpacketz("T05");
-		} else if(last_target) {
-			cur_target = target_attach(last_target,
-						   &gdb_controller);
-
-			/* If we were able to attach to the target again */
-			if (cur_target) {
-				target_set_cmdline(cur_target, cmdline);
-				target_reset(cur_target);
-				morse(NULL, false);
-				gdb_putpacketz("T05");
-			} else	gdb_putpacketz("E01");
-
 		} else	gdb_putpacketz("E01");
 
-	} else if (sscanf(packet, "vFlashErase:%08lx,%08lx", &addr, &len) == 2) {
+	} else	gdb_putpacketz("E01");
+
+}
+static void exec_v_flash_erase(const char *packet, int plen) 
+{
+	(void)plen;
+	unsigned long addr,len;
+ 	if (sscanf(packet, "%08lx,%08lx", &addr, &len) == 2) {
 		/* Erase Flash Memory */
 		DEBUG_GDB("Flash Erase %08lX %08lX\n", addr, len);
 		if(!cur_target) { gdb_putpacketz("EFF"); return; }
@@ -552,27 +561,56 @@ handle_v_packet(char *packet, int plen)
 			flash_mode = 0;
 			gdb_putpacketz("EFF");
 		}
-
-	} else if (sscanf(packet, "vFlashWrite:%08lx:%n", &addr, &bin) == 1) {
-		/* Write Flash Memory */
-		len = plen - bin;
-		DEBUG_GDB("Flash Write %08lX %08lX\n", addr, len);
-		if(cur_target && target_flash_write(cur_target, addr, (void*)packet + bin, len) == 0) {
-			gdb_putpacketz("OK");
-		} else {
-			flash_mode = 0;
-			gdb_putpacketz("EFF");
-		}
-
-	} else if (!strcmp(packet, "vFlashDone")) {
-		/* Commit flash operations. */
-		gdb_putpacketz(target_flash_done(cur_target) ? "EFF" : "OK");
-		flash_mode = 0;
-
-	} else {
-		DEBUG_GDB("*** Unsupported packet: %s\n", packet);
-		gdb_putpacket("", 0);
 	}
+}
+static void exec_v_flash_write(const char *packet, int plen) 
+{
+	unsigned long addr, len;
+	int bin;
+	if (sscanf(packet, "%08lx:%n", &addr, &bin) != 1) {
+		DEBUG_GDB("*** malformed vAttached packet: %s\n", packet);
+		gdb_putpacket("", 0);
+		return;
+	}
+	/* Write Flash Memory */
+	len = plen - bin;
+	DEBUG_GDB("Flash Write %08lX %08lX\n", addr, len);
+	if(cur_target && target_flash_write(cur_target, addr, (void*)packet + bin, len) == 0) {
+		gdb_putpacketz("OK");
+	} else {
+		flash_mode = 0;
+		gdb_putpacketz("EFF");
+	}
+}
+
+static void exec_v_flash_done(const char *packet, int len) 
+{
+	(void)len;(void)packet;
+	/* Commit flash operations. */
+	gdb_putpacketz(target_flash_done(cur_target) ? "EFF" : "OK");
+	flash_mode = 0;
+}
+
+
+static const cmd_executer v_commands[]=
+{
+	{"vAttach;",						exec_v_attachd},
+	{"vRun",							exec_v_run},
+	{"vFlashErase:",        			exec_v_flash_erase},
+	{"vFlashWrite:",        			exec_v_flash_write},
+	{"vFlashDone:",        				exec_v_flash_done},
+	
+	{NULL,NULL},
+};
+
+static void
+handle_v_packet(char *packet, int len)
+{
+	if(exec_command(packet,len,v_commands)) {
+		return;
+	}
+	DEBUG_GDB("*** Unsupported packet: %s\n", packet);
+	gdb_putpacket("", 0);
 }
 
 static void
