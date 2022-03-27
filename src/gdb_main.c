@@ -374,9 +374,11 @@ int datalen;
 		gdb_putpacketz("");
 	else if(c == 0)
 		gdb_putpacketz("OK");
-	else
-		gdb_putpacket(hexify(pbuf, "Failed\n", strlen("Failed\n")),
-				2 * strlen("Failed\n"));
+	else {
+        const char *err="Failed\n";
+        int l=strlen(err);
+		gdb_putpacket(hexify(pbuf, err, l), 2 * l );
+    }
     return 0;
 }
 
@@ -388,14 +390,15 @@ handle_q_string_reply(const char *str, const char *param)
 	if (sscanf(param, "%08lx,%08lx", &addr, &len) != 2) {
         return -1;
 	}
-	if (addr > strlen (str)) {
+	unsigned long l=strlen(str);
+	if (addr > l) {
         return -1;
 	}
-	if(addr== strlen (str)) {
+	if(addr== l) {
 		gdb_putpacketz("l");
 		return 0;
 	}
-	unsigned long output_len=strlen(str)-addr;
+	unsigned long output_len=l-addr;
 	if(output_len>len) output_len=len;
 	gdb_putpacket2("m",1,str+addr,output_len);
     return 0;
@@ -607,7 +610,7 @@ static const cmd_executer v_commands[]=
 	{"vRun",							exec_v_run},
 	{"vFlashErase:",        			exec_v_flash_erase},
 	{"vFlashWrite:",        			exec_v_flash_write},
-	{"vFlashDone:",        				exec_v_flash_done},
+	{"vFlashDone",        				exec_v_flash_done},
 	
 	{NULL,NULL},
 };
