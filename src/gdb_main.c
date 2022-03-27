@@ -375,11 +375,11 @@ int datalen;
 	else if(c == 0)
 		gdb_putpacketz("OK");
 	else {
-        const char *err="Failed\n";
-        int l=strlen(err);
+		const char *err="Failed\n";
+		int l=strlen(err);
 		gdb_putpacket(hexify(pbuf, err, l), 2 * l );
-    }
-    return 0;
+	}
+	return 0;
 }
 
 static int
@@ -388,11 +388,11 @@ handle_q_string_reply(const char *str, const char *param)
 	unsigned long addr, len;
 
 	if (sscanf(param, "%08lx,%08lx", &addr, &len) != 2) {
-        return -1;
+		return -1;
 	}
 	unsigned long l=strlen(str);
 	if (addr > l) {
-        return -1;
+		return -1;
 	}
 	if(addr== l) {
 		gdb_putpacketz("l");
@@ -401,14 +401,14 @@ handle_q_string_reply(const char *str, const char *param)
 	unsigned long output_len=l-addr;
 	if(output_len>len) output_len=len;
 	gdb_putpacket2("m",1,str+addr,output_len);
-    return 0;
+	return 0;
 }
 static int exec_q_supported(const char *packet, int len)
 {
 	(void)packet;
 	(void)len;
 	gdb_putpacket_f("PacketSize=%X;qXfer:memory-map:read+;qXfer:features:read+", BUF_SIZE);
-    return 0;
+	return 0;
 }
 
 static int exec_q_memory_map(const char *packet,int len)
@@ -418,8 +418,7 @@ static int exec_q_memory_map(const char *packet,int len)
 	/* Read target XML memory map */
 	if((!cur_target) && last_target) {
 		/* Attach to last target if detached. */
-		cur_target = target_attach(last_target,
-				   &gdb_controller);
+		cur_target = target_attach(last_target, &gdb_controller);
 	}
 	if (!cur_target) {
 		return -1;
@@ -462,11 +461,11 @@ static int exec_q_crc(const char *packet, int len)
 }
 static const cmd_executer q_commands[]=
 {
-	{"qRcmd,",                         exec_q_rcmd},
-	{"qSupported",                     exec_q_supported},
-	{"qXfer:memory-map:read::",        exec_q_memory_map},
-	{"qXfer:features:read:target.xml:",exec_q_feature_read},
-	{"qCRC:",                          exec_q_crc},
+	{"qRcmd,", 								exec_q_rcmd},
+	{"qSupported",							exec_q_supported},
+	{"qXfer:memory-map:read::",  			exec_q_memory_map},
+	{"qXfer:features:read:target.xml:",		exec_q_feature_read},
+	{"qCRC:", exec_q_crc},
 
 	{NULL,NULL},
 };
@@ -484,12 +483,12 @@ static int exec_v_attach(const char *packet, int len)
 	(void)len;
 	if(sscanf(packet, "%08lx", &addr) != 1)
 	{
-        return -1; // should we return an error here ?
+		return -1; // should we return an error here ?
 	}
 	/* Attach to remote target processor */
 	cur_target = target_attach_n(addr, &gdb_controller);
 	if(!cur_target)
-		return -1;   
+		return -1; 
 	morse(NULL, false);
 	gdb_putpacketz("T05");
 	return 0;
@@ -552,7 +551,7 @@ static int exec_v_flash_erase(const char *packet, int plen)
 	(void)plen;
 	unsigned long addr,len;
  	if (sscanf(packet, "%08lx,%08lx", &addr, &len) != 2)
-		return -1;   
+		return -1;  
 
 	/* Erase Flash Memory */
 	DEBUG_GDB("Flash Erase %08lX %08lX\n", addr, len);
@@ -608,9 +607,9 @@ static const cmd_executer v_commands[]=
 {
 	{"vAttach;",						exec_v_attach},
 	{"vRun",							exec_v_run},
-	{"vFlashErase:",        			exec_v_flash_erase},
-	{"vFlashWrite:",        			exec_v_flash_write},
-	{"vFlashDone",        				exec_v_flash_done},
+	{"vFlashErase:",					exec_v_flash_erase},
+	{"vFlashWrite:",		 			exec_v_flash_write},
+	{"vFlashDone",		 				exec_v_flash_done},
 	
 	{NULL,NULL},
 };
