@@ -45,13 +45,15 @@ enum gdb_signal {
 
 #define BUF_SIZE	1024
 
+#define UNUSED_ARG(x) (void)x
+
 #define ERROR_IF_NO_TARGET()	\
 	if(!cur_target) { gdb_putpacketz("EFF"); break; }
 
 typedef struct
 {
 	const char *cmd_prefix;
-	void  (*func)(const char *packet,int len);
+	int  (*func)(const char *packet,int len);
 }cmd_executer;
 
 
@@ -337,20 +339,25 @@ int gdb_main_loop(struct target_controller *tc, bool in_syscall)
 		}
 	}
 }
-bool exec_command(char *packet, int len, const cmd_executer *exec)
+static bool exec_command(char *packet, int len, const cmd_executer *exec)
 {
 	while(exec->cmd_prefix) {
 		int l=strlen(exec->cmd_prefix);
 		if(!strncmp(packet,exec->cmd_prefix,l)) {
-			exec->func(packet+l,len-l);
-			return true;
+			if(!exec->func(packet+l,len-l))
+				return true;
+			else {
+				gdb_putpacketz("E01"); // error / maformed command
+				return false;
+			}
 		}
 		exec++;
 	}
+	gdb_putpacket("", 0); // command not found
 	return false;
 }
 
-static void exec_q_rcmd(const char *packet,int len)
+static int exec_q_rcmd(const char *packet,int len)
 {
 char *data;
 int datalen;
@@ -370,37 +377,38 @@ int datalen;
 	else
 		gdb_putpacket(hexify(pbuf, "Failed\n", strlen("Failed\n")),
 				2 * strlen("Failed\n"));
+    return 0;
 }
 
-static void
+static int
 handle_q_string_reply(const char *str, const char *param)
 {
 	unsigned long addr, len;
 
 	if (sscanf(param, "%08lx,%08lx", &addr, &len) != 2) {
-		gdb_putpacketz("E01");
-		return;
+        return -1;
 	}
 	if (addr > strlen (str)) {
-		gdb_putpacketz("E01");
-		return;
+        return -1;
 	}
 	if(addr== strlen (str)) {
 		gdb_putpacketz("l");
-		return;
+		return 0;
 	}
 	unsigned long output_len=strlen(str)-addr;
 	if(output_len>len) output_len=len;
 	gdb_putpacket2("m",1,str+addr,output_len);
+    return 0;
 }
-static void exec_q_supported(const char *packet, int len)
+static int exec_q_supported(const char *packet, int len)
 {
 	(void)packet;
 	(void)len;
 	gdb_putpacket_f("PacketSize=%X;qXfer:memory-map:read+;qXfer:features:read+", BUF_SIZE);
+    return 0;
 }
 
-static void exec_q_memory_map(const char *packet,int len)
+static int exec_q_memory_map(const char *packet,int len)
 {
 	(void)packet;
 	(void)len;
@@ -411,15 +419,14 @@ static void exec_q_memory_map(const char *packet,int len)
 				   &gdb_controller);
 	}
 	if (!cur_target) {
-		gdb_putpacketz("E01");
-		return;
+		return -1;
 	}
 	char buf[1024];
 	target_mem_map(cur_target, buf, sizeof(buf)); /* Fixme: Check size!*/
-	handle_q_string_reply(buf, packet);
+	return handle_q_string_reply(buf, packet);
 }
 
-static void exec_q_feature_read(const char *packet, int len)
+static int exec_q_feature_read(const char *packet, int len)
 {
 	(void)len;
 	/* Read target description */
@@ -428,28 +435,27 @@ static void exec_q_feature_read(const char *packet, int len)
 	  cur_target = target_attach(last_target, &gdb_controller);
 	}
 	if (!cur_target) {
-	  gdb_putpacketz("E01");
-	  return;
+	  return -1; 
 	}
-	handle_q_string_reply(target_tdesc(cur_target), packet );
+	return handle_q_string_reply(target_tdesc(cur_target), packet );
 }
 
-static void exec_q_crc(const char *packet, int len)
+static int exec_q_crc(const char *packet, int len)
 {
 	(void)len;
 	uint32_t addr, alen;
-	if (sscanf(packet, "%" PRIx32 ",%" PRIx32, &addr, &alen) == 2) {
-		if(!cur_target) {
-			gdb_putpacketz("E01");
-			return;
-		}
-		uint32_t crc;
-		int res = generic_crc32(cur_target, &crc, addr, alen);
-		if (res)
-			gdb_putpacketz("E03");
-		else
-			gdb_putpacket_f("C%lx", crc);
-	}
+	if (sscanf(packet, "%" PRIx32 ",%" PRIx32, &addr, &alen) != 2) 
+		return -1;
+	if(!cur_target) 
+		return -1;
+		
+	uint32_t crc;
+	int res = generic_crc32(cur_target, &crc, addr, alen);
+	if (res)
+		gdb_putpacketz("E03");
+	else
+		gdb_putpacket_f("C%lx", crc);
+	return 0;
 }
 static const cmd_executer q_commands[]=
 {
@@ -465,32 +471,27 @@ static const cmd_executer q_commands[]=
 static void
 handle_q_packet(char *packet, int len)
 {
-	if(exec_command(packet,len,q_commands)) {
-		return;
-	}
-	DEBUG_GDB("*** Unsupported packet: %s\n", packet);
-	gdb_putpacket("", 0);
+	exec_command(packet,len,q_commands);
 }
 
 static uint8_t flash_mode = 0;
-static void exec_v_attachd(const char *packet, int len) 
+static int exec_v_attach(const char *packet, int len) 
 {
 	unsigned long addr;
 	(void)len;
-	if(sscanf(packet, ";%08lx", &addr) != 1)
+	if(sscanf(packet, "%08lx", &addr) != 1)
 	{
-		DEBUG_GDB("*** malformed vAttached packet: %s\n", packet);
-		gdb_putpacket("", 0);
+        return -1; // should we return an error here ?
 	}
 	/* Attach to remote target processor */
 	cur_target = target_attach_n(addr, &gdb_controller);
-	if(cur_target) {
-		morse(NULL, false);
-		gdb_putpacketz("T05");
-	} else
-		gdb_putpacketz("E01");
+	if(!cur_target)
+		return -1;   
+	morse(NULL, false);
+	gdb_putpacketz("T05");
+	return 0;
 }
-static void exec_v_run(const char *packet, int len) 
+static int exec_v_run(const char *packet, int len) 
 {
 	(void)len;
 	/* Parse command line for get_cmdline semihosting call */
@@ -525,52 +526,58 @@ static void exec_v_run(const char *packet, int len)
 		target_set_cmdline(cur_target, cmdline);
 		target_reset(cur_target);
 		gdb_putpacketz("T05");
-	} else if(last_target) {
-		cur_target = target_attach(last_target,
+		return 0;
+	} 
+ 	if(!last_target)
+		return -1;	
+	
+	cur_target = target_attach(last_target,
 					   &gdb_controller);
 
-		/* If we were able to attach to the target again */
-		if (cur_target) {
+	/* If we were able to attach to the target again */
+	if (cur_target) {
 			target_set_cmdline(cur_target, cmdline);
 			target_reset(cur_target);
 			morse(NULL, false);
 			gdb_putpacketz("T05");
-		} else	gdb_putpacketz("E01");
-
-	} else	gdb_putpacketz("E01");
-
+			return 0;
+		} 
+	return -1;
 }
-static void exec_v_flash_erase(const char *packet, int plen) 
+static int exec_v_flash_erase(const char *packet, int plen) 
 {
 	(void)plen;
 	unsigned long addr,len;
- 	if (sscanf(packet, "%08lx,%08lx", &addr, &len) == 2) {
-		/* Erase Flash Memory */
-		DEBUG_GDB("Flash Erase %08lX %08lX\n", addr, len);
-		if(!cur_target) { gdb_putpacketz("EFF"); return; }
+ 	if (sscanf(packet, "%08lx,%08lx", &addr, &len) != 2)
+		return -1;   
 
-		if(!flash_mode) {
-			/* Reset target if first flash command! */
-			/* This saves us if we're interrupted in IRQ context */
-			target_reset(cur_target);
-			flash_mode = 1;
-		}
-		if(target_flash_erase(cur_target, addr, len) == 0) {
-			gdb_putpacketz("OK");
-		} else {
-			flash_mode = 0;
-			gdb_putpacketz("EFF");
-		}
+	/* Erase Flash Memory */
+	DEBUG_GDB("Flash Erase %08lX %08lX\n", addr, len);
+	if(!cur_target) { 
+			gdb_putpacketz("EFF"); 
+			return 0; 
 	}
+
+	if(!flash_mode) {
+		/* Reset target if first flash command! */
+		/* This saves us if we're interrupted in IRQ context */
+		target_reset(cur_target);
+		flash_mode = 1;
+	}
+	if(target_flash_erase(cur_target, addr, len) == 0) {
+		gdb_putpacketz("OK");
+		return 0;
+	} 
+	flash_mode = 0;
+	gdb_putpacketz("EFF");
+	return 0;	
 }
-static void exec_v_flash_write(const char *packet, int plen) 
+static int exec_v_flash_write(const char *packet, int plen) 
 {
 	unsigned long addr, len;
 	int bin;
 	if (sscanf(packet, "%08lx:%n", &addr, &bin) != 1) {
-		DEBUG_GDB("*** malformed vAttached packet: %s\n", packet);
-		gdb_putpacket("", 0);
-		return;
+		return -1;
 	}
 	/* Write Flash Memory */
 	len = plen - bin;
@@ -581,20 +588,22 @@ static void exec_v_flash_write(const char *packet, int plen)
 		flash_mode = 0;
 		gdb_putpacketz("EFF");
 	}
+	return 0;
 }
 
-static void exec_v_flash_done(const char *packet, int len) 
+static int exec_v_flash_done(const char *packet, int len) 
 {
 	(void)len;(void)packet;
 	/* Commit flash operations. */
 	gdb_putpacketz(target_flash_done(cur_target) ? "EFF" : "OK");
 	flash_mode = 0;
+	return 0;
 }
 
 
 static const cmd_executer v_commands[]=
 {
-	{"vAttach;",						exec_v_attachd},
+	{"vAttach;",						exec_v_attach},
 	{"vRun",							exec_v_run},
 	{"vFlashErase:",        			exec_v_flash_erase},
 	{"vFlashWrite:",        			exec_v_flash_write},
@@ -606,11 +615,7 @@ static const cmd_executer v_commands[]=
 static void
 handle_v_packet(char *packet, int len)
 {
-	if(exec_command(packet,len,v_commands)) {
-		return;
-	}
-	DEBUG_GDB("*** Unsupported packet: %s\n", packet);
-	gdb_putpacket("", 0);
+	exec_command(packet,len,v_commands);
 }
 
 static void
