@@ -363,11 +363,11 @@ static bool stm32f1_flash_busy_wait(target *t, uint32_t bank_offset)
 	uint32_t sr;
 	do {
 		sr = target_mem_read32(t, FLASH_SR + bank_offset);
-		if ((sr & SR_ERROR_MASK) || !(sr & SR_EOP) || target_check_error(t)) {
-			DEBUG_WARN("stm32f1 flash error 0x%" PRIx32 "\n", sr);
-			return false;
-		}
 	} while (sr & FLASH_SR_BSY);
+	if ((sr & SR_ERROR_MASK) || !(sr & SR_EOP) || target_check_error(t)) {
+		DEBUG_WARN("stm32f1 flash error 0x%" PRIx32 "\n", sr);
+		return false;
+	}
 
 	return true;
 }
