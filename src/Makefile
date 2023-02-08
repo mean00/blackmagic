@@ -59,6 +59,7 @@ SRC =              \
 	nrf51.c        \
 	nxpke04.c      \
 	remote.c       \
+	riscv_debug.c  \
 	rp.c           \
 	sam3x.c        \
 	sam4l.c        \
