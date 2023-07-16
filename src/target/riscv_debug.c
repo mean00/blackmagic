@@ -504,8 +504,15 @@ static uint32_t riscv_hart_discover_isa(riscv_hart_s *const hart)
 			return isa_data[0];
 		}
 		/* If that failed, then find out why and instead try the next narrower width */
-		if (hart->status != RISCV_HART_BUS_ERROR && hart->status != RISCV_HART_EXCEPTION)
+		switch (hart->status) {
+		case RISCV_HART_BUS_ERROR:
+		case RISCV_HART_EXCEPTION:
+		case RISCV_HART_NOT_SUPP: // FX
+			break;
+		default:
 			return 0;
+			break;
+		}
 		if (hart->access_width == 32U) {
 			hart->access_width = 0U;
 			return 0; /* We are unable to read the misa register */
