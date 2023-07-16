@@ -507,7 +507,7 @@ static uint32_t riscv_hart_discover_isa(riscv_hart_s *const hart)
 		switch (hart->status) {
 		case RISCV_HART_BUS_ERROR:
 		case RISCV_HART_EXCEPTION:
-		case RISCV_HART_NOT_SUPP: // WCH reply that
+		case RISCV_HART_NOT_SUPP: // WCH CH32Vx chips reply that
 			break;
 		default:
 			return 0;
@@ -517,10 +517,7 @@ static uint32_t riscv_hart_discover_isa(riscv_hart_s *const hart)
 			hart->access_width = 0U;
 			return 0; /* We are unable to read the misa register */
 		}
-		if (hart->access_width == 64U)
-			hart->access_width = 32U;
-		if (hart->access_width == 128U)
-			hart->access_width = 64U;
+		hart->access_width >>= 1;
 	} while (hart->access_width != 0U);
 	DEBUG_WARN("Unable to read misa register\n");
 	/* If the above loop failed, we're done.. */
