@@ -507,7 +507,7 @@ static uint32_t riscv_hart_discover_isa(riscv_hart_s *const hart)
 		switch (hart->status) {
 		case RISCV_HART_BUS_ERROR:
 		case RISCV_HART_EXCEPTION:
-		case RISCV_HART_NOT_SUPP: // FX
+		case RISCV_HART_NOT_SUPP: // WCH reply that
 			break;
 		default:
 			return 0;
