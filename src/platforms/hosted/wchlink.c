@@ -307,7 +307,6 @@ bool wchlink_init(bmp_info_s *const info)
 	usb_link_s *link = calloc(1, sizeof(usb_link_s));
 	if (!link)
 		return false;
-
 	info->usb_link = link;
 	link->context = info->libusb_ctx;
 
@@ -347,9 +346,7 @@ bool wchlink_init(bmp_info_s *const info)
 		return false;
 	}
 
-	link->req_trans = libusb_alloc_transfer(0);
-	link->rep_trans = libusb_alloc_transfer(0);
-	if (!link->req_trans || !link->rep_trans || !link->ep_tx || !link->ep_rx) {
+	if (!link->ep_tx || !link->ep_rx) {
 		DEBUG_WARN("Device setup failed\n");
 		libusb_release_interface(info->usb_link->device_handle, info->usb_link->interface);
 		libusb_close(info->usb_link->device_handle);
