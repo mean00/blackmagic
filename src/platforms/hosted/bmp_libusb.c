@@ -29,7 +29,7 @@
 void bmp_ident(bmp_info_s *info)
 {
 	DEBUG_INFO("Black Magic Debug App %s\n for Black Magic Probe, ST-Link v2 and v3, CMSIS-DAP, "
-			   "J-Link and FTDI (MPSSE)\n",
+			   "J-Link, FTDI (MPSSE) and WCHLink\n",
 		FIRMWARE_VERSION);
 	if (info && info->vid && info->pid) {
 		DEBUG_INFO("Using %04x:%04x %s %s\n %s\n", info->vid, info->pid,
@@ -258,6 +258,8 @@ rescan:
 			}
 		} else if (desc.idVendor == VENDOR_ID_SEGGER)
 			type = BMP_TYPE_JLINK;
+		else if (desc.idVendor == VENDOR_ID_WCH)
+			type = BMP_TYPE_WCHLINK;
 		else {
 			const cable_desc_s *cable = cable_desc;
 			for (; cable->name; ++cable) {

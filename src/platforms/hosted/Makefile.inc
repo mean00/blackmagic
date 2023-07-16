@@ -103,6 +103,7 @@ ifneq ($(HOSTED_BMP_ONLY), 1)
     SRC += bmp_libusb.c stlinkv2.c stlinkv2_jtag.c stlinkv2_swd.c
     SRC += ftdi_bmp.c ftdi_jtag.c ftdi_swd.c
     SRC += jlink.c jlink_jtag.c jlink_swd.c
+    SRC += riscv_dtm_wchlink.c wchlink.c
 else
     SRC += bmp_serial.c
 endif
