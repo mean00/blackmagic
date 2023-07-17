@@ -42,22 +42,32 @@
 #include "cortexm.h"
 
 typedef struct {
-	uint32_t fpec;   //4
-	uint32_t obkey;  // 8
-	uint32_t statr;  // C
-	uint32_t ctlr;   // 10
-	uint32_t addr;   //14
-	uint32_t filler; //18
-	uint32_t obr;    // 1C
+	uint32_t ws;      // 0
+	uint32_t key;     //4 aka fpec
+	uint32_t obkey;   // 8
+	uint32_t statr;   // C
+	uint32_t ctlr;    // 10
+	uint32_t addr;    //14
+	uint32_t filler;  //18
+	uint32_t obr;     // 1C
+	uint32_t wpr;     // 20
+	uint32_t modekey; // 24
 } ch32_flash_s;
 
-#define CH32V3XX_FLASH_CONTROLLER_ADDRESS 0x40022004
+#define CH32V3XX_FLASH_CONTROLLER_ADDRESS 0x40022000
 #define CH32V3XX_UID1                     0x1ffff7e8 // Low bits of UUID
+
+#define CH32V3XX_FMC_CTL_LK              (1 << 7)
+#define CH32V3XX_FMC_CTL_CH32_FASTUNLOCK (1 << 15)
+#define CH32V3XX_FMC_CTL_CH32_FASTERASE  (1 << 17)
+
+#define CH32V3XX_KEY1 0x45670123
+#define CH32V3XX_KEY2 0xcdef89ab
 
 #define READ_FLASH_REG(target, reg) \
 	target_mem_read32(target, CH32V3XX_FLASH_CONTROLLER_ADDRESS + offsetof(ch32_flash_s, reg))
 #define WRITE_FLASH_REG(target, reg, value) \
-	target_mem_write32(target, CH32V3XX_FLASH_CONTROLLER_ADDRESS + offsetof(ch32_flash_s, reg, value))
+	target_mem_write32(target, CH32V3XX_FLASH_CONTROLLER_ADDRESS + offsetof(ch32_flash_s, reg), value)
 
 const command_s ch32v3x_cmd_list[] = {
 	{NULL, NULL, NULL},
@@ -66,6 +76,8 @@ const command_s ch32v3x_cmd_list[] = {
 static bool ch32v3x_flash_erase(target_flash_s *flash, target_addr_t addr, size_t len);
 static bool ch32v3x_flash_write(target_flash_s *flash, target_addr_t dest, const void *src, size_t len);
 
+/*
+*/
 static void ch32v3x_add_flash(target_s *target, uint32_t addr, size_t length, size_t erasesize)
 {
 	target_flash_s *flash = calloc(1, sizeof(*flash));
@@ -120,14 +132,46 @@ bool ch32v3xx_probe(target_s *target)
 	return true;
 }
 
+/*
+*/
+static bool ch32v3x_fast_unlock(target_s *target)
+{
+	// send unlock sequence
+	WRITE_FLASH_REG(target, key, CH32V3XX_KEY1);
+	WRITE_FLASH_REG(target, key, CH32V3XX_KEY2);
+
+	// send fast unlock sequence
+	WRITE_FLASH_REG(target, modekey, CH32V3XX_KEY1);
+	WRITE_FLASH_REG(target, modekey, CH32V3XX_KEY2);
+
+	uint32_t v = READ_FLASH_REG(target, ctlr);
+	return !(v & CH32V3XX_FMC_CTL_CH32_FASTUNLOCK);
+}
+
+/*
+*/
+static bool ch32v3x_fast_lock(target_s *target)
+{
+	uint32_t v = READ_FLASH_REG(target, ctlr);
+	v |= CH32V3XX_FMC_CTL_LK;
+	WRITE_FLASH_REG(target, ctlr, v);
+	return true;
+}
+
+/*
+*/
 static bool ch32v3x_flash_erase(target_flash_s *flash, target_addr_t addr, size_t len)
 {
-	(void)flash;
+	//(void)flash;
 	(void)addr;
 	(void)len;
+	ch32v3x_fast_unlock(flash->t);
+	ch32v3x_fast_lock(flash->t);
 	return false;
 }
 
+/*
+*/
 static bool ch32v3x_flash_write(target_flash_s *flash, target_addr_t dest, const void *src, size_t len)
 {
 	(void)flash;
@@ -136,315 +180,5 @@ static bool ch32v3x_flash_write(target_flash_s *flash, target_addr_t dest, const
 	(void)len;
 	return false;
 }
-#if 0
-static bool ch32v3x_mass_erase(target_s *target)
-{
-    (void)target;
-    return false;
-}
-#endif
-#if 0
-static bool ch32v3x_flash_unlock(target_s *target, uint32_t bank_offset)
-{
-	target_mem_write32(target, FLASH_KEYR + bank_offset, KEY1);
-	target_mem_write32(target, FLASH_KEYR + bank_offset, KEY2);
-	uint32_t ctrl = target_mem_read32(target, FLASH_CR);
-	if (ctrl & FLASH_CR_LOCK)
-		DEBUG_ERROR("unlock failed, cr: 0x%08" PRIx32 "\n", ctrl);
-	return !(ctrl & FLASH_CR_LOCK);
-}
 
-static inline void ch32v3x_flash_clear_eop(target_s *const target, const uint32_t bank_offset)
-{
-	const uint32_t status = target_mem_read32(target, FLASH_SR + bank_offset);
-	target_mem_write32(target, FLASH_SR + bank_offset, status | SR_EOP); /* EOP is W1C */
-}
-
-static bool ch32v3x_flash_busy_wait(
-	target_s *const target, const uint32_t bank_offset, platform_timeout_s *const timeout)
-{
-	/* Read FLASH_SR to poll for BSY bit */
-	uint32_t status = FLASH_SR_BSY;
-	/*
-	 * Please note that checking EOP here is only legal because every operation is preceded by
-	 * a call to ch32v3x_flash_clear_eop. Without this the flag could be stale from a previous
-	 * operation and is always set at the end of every program/erase operation.
-	 * For more information, see FLASH_SR register description §3.4 pg 25.
-	 * https://www.st.com/resource/en/programming_manual/pm0075-ch32v3x0xxx-flash-memory-microcontrollers-stmicroelectronics.pdf
-	 */
-	while (!(status & SR_EOP) && (status & FLASH_SR_BSY)) {
-		status = target_mem_read32(target, FLASH_SR + bank_offset);
-		if (target_check_error(target)) {
-			DEBUG_ERROR("Lost communications with target");
-			return false;
-		}
-		if (timeout)
-			target_print_progress(timeout);
-	};
-	if (status & SR_ERROR_MASK)
-		DEBUG_ERROR("ch32v3x flash error 0x%" PRIx32 "\n", status);
-	return !(status & SR_ERROR_MASK);
-}
-
-static uint32_t ch32v3x_bank_offset_for(target_addr_t addr)
-{
-	if (addr >= FLASH_BANK_SPLIT)
-		return FLASH_BANK2_OFFSET;
-	return FLASH_BANK1_OFFSET;
-}
-
-static bool ch32v3x_flash_erase(target_flash_s *flash, target_addr_t addr, size_t len)
-{
-	target_s *target = flash->t;
-	target_addr_t end = addr + len - 1U;
-
-	/* Unlocked an appropriate flash bank */
-	if ((target->part_id == 0x430U && end >= FLASH_BANK_SPLIT && !ch32v3x_flash_unlock(target, FLASH_BANK2_OFFSET)) ||
-		(addr < FLASH_BANK_SPLIT && !ch32v3x_flash_unlock(target, 0)))
-		return false;
-
-	for (size_t offset = 0; offset < len; offset += flash->blocksize) {
-		const uint32_t bank_offset = ch32v3x_bank_offset_for(addr + offset);
-		ch32v3x_flash_clear_eop(target, bank_offset);
-
-		/* Flash page erase instruction */
-		target_mem_write32(target, FLASH_CR + bank_offset, FLASH_CR_PER);
-		/* write address to FMA */
-		target_mem_write32(target, FLASH_AR + bank_offset, addr + offset);
-		/* Flash page erase start instruction */
-		target_mem_write32(target, FLASH_CR + bank_offset, FLASH_CR_STRT | FLASH_CR_PER);
-
-		/* Wait for completion or an error */
-		if (!ch32v3x_flash_busy_wait(target, bank_offset, NULL))
-			return false;
-	}
-	return true;
-}
-
-static size_t ch32v3x_bank1_length(target_addr_t addr, size_t len)
-{
-	if (addr >= FLASH_BANK_SPLIT)
-		return 0;
-	if (addr + len > FLASH_BANK_SPLIT)
-		return FLASH_BANK_SPLIT - addr;
-	return len;
-}
-
-static bool ch32v3x_flash_write(target_flash_s *flash, target_addr_t dest, const void *src, size_t len)
-{
-	target_s *target = flash->t;
-	const size_t offset = ch32v3x_bank1_length(dest, len);
-
-	/* Start by writing any bank 1 data */
-	if (offset) {
-		ch32v3x_flash_clear_eop(target, FLASH_BANK1_OFFSET);
-
-		target_mem_write32(target, FLASH_CR, FLASH_CR_PG);
-		/* Use the target API instead of a direct Cortex-M call for GD32VF103 parts */
-		if (target->designer_code == JEP106_MANUFACTURER_RV_GIGADEVICE && target->cpuid == 0x80000022U)
-			target_mem_write(target, dest, src, offset);
-		else
-			cortexm_mem_write_sized(target, dest, src, offset, ALIGN_HALFWORD);
-
-		/* Wait for completion or an error */
-		if (!ch32v3x_flash_busy_wait(target, FLASH_BANK1_OFFSET, NULL))
-			return false;
-	}
-
-	/* If there's anything to write left over and we're on a part with a second bank, write to bank 2 */
-	const size_t remainder = len - offset;
-	if (target->part_id == 0x430U && remainder) {
-		const uint8_t *data = src;
-		ch32v3x_flash_clear_eop(target, FLASH_BANK2_OFFSET);
-
-		target_mem_write32(target, FLASH_CR + FLASH_BANK2_OFFSET, FLASH_CR_PG);
-		/* Use the target API instead of a direct Cortex-M call for GD32VF103 parts */
-		if (target->designer_code == JEP106_MANUFACTURER_RV_GIGADEVICE && target->cpuid == 0x80000022U)
-			target_mem_write(target, dest + offset, data + offset, remainder);
-		else
-			cortexm_mem_write_sized(target, dest + offset, data + offset, remainder, ALIGN_HALFWORD);
-
-		/* Wait for completion or an error */
-		if (!ch32v3x_flash_busy_wait(target, FLASH_BANK2_OFFSET, NULL))
-			return false;
-	}
-
-	return true;
-}
-
-static bool ch32v3x_mass_erase_bank(
-	target_s *const target, const uint32_t bank_offset, platform_timeout_s *const timeout)
-{
-	/* Unlock the bank */
-	if (!ch32v3x_flash_unlock(target, bank_offset))
-		return false;
-	ch32v3x_flash_clear_eop(target, bank_offset);
-
-	/* Flash mass erase start instruction */
-	target_mem_write32(target, FLASH_CR + bank_offset, FLASH_CR_MER);
-	target_mem_write32(target, FLASH_CR + bank_offset, FLASH_CR_STRT | FLASH_CR_MER);
-
-	/* Wait for completion or an error */
-	return ch32v3x_flash_busy_wait(target, bank_offset, timeout);
-}
-
-static bool ch32v3x_mass_erase(target_s *target)
-{
-	if (!ch32v3x_flash_unlock(target, 0))
-		return false;
-
-	platform_timeout_s timeout;
-	platform_timeout_set(&timeout, 500);
-	if (!ch32v3x_mass_erase_bank(target, FLASH_BANK1_OFFSET, &timeout))
-		return false;
-
-	/* If we're on a part that has a second bank, mass erase that bank too */
-	if (target->part_id == 0x430U)
-		return ch32v3x_mass_erase_bank(target, FLASH_BANK2_OFFSET, &timeout);
-	return true;
-}
-
-static uint16_t ch32v3x_flash_readable_key(const target_s *const target)
-{
-	switch (target->part_id) {
-	case 0x422U: /* STM32F30x */
-	case 0x432U: /* STM32F37x */
-	case 0x438U: /* STM32F303x6/8 and STM32F328 */
-	case 0x440U: /* STM32F0 */
-	case 0x446U: /* STM32F303xD/E and STM32F398xE */
-	case 0x445U: /* STM32F04 RM0091 Rev.7, STM32F070x6 RM0360 Rev. 4*/
-	case 0x448U: /* STM32F07 RM0091 Rev.7, STM32F070xb RM0360 Rev. 4*/
-	case 0x442U: /* STM32F09 RM0091 Rev.7, STM32F030xc RM0360 Rev. 4*/
-		return FLASH_OBP_RDP_KEY_F3;
-	}
-	return FLASH_OBP_RDP_KEY;
-}
-
-static bool ch32v3x_option_erase(target_s *target)
-{
-	ch32v3x_flash_clear_eop(target, FLASH_BANK1_OFFSET);
-
-	/* Erase option bytes instruction */
-	target_mem_write32(target, FLASH_CR, FLASH_CR_OPTER | FLASH_CR_OPTWRE);
-	target_mem_write32(target, FLASH_CR, FLASH_CR_STRT | FLASH_CR_OPTER | FLASH_CR_OPTWRE);
-
-	/* Wait for completion or an error */
-	return ch32v3x_flash_busy_wait(target, FLASH_BANK1_OFFSET, NULL);
-}
-
-static bool ch32v3x_option_write_erased(
-	target_s *const target, const size_t offset, const uint16_t value, const bool write16_broken)
-{
-	if (value == 0xffffU)
-		return true;
-
-	ch32v3x_flash_clear_eop(target, FLASH_BANK1_OFFSET);
-
-	/* Erase option bytes instruction */
-	target_mem_write32(target, FLASH_CR, FLASH_CR_OPTPG | FLASH_CR_OPTWRE);
-
-	const uint32_t addr = FLASH_OBP_RDP + (offset * 2U);
-	if (write16_broken)
-		target_mem_write32(target, addr, 0xffff0000U | value);
-	else
-		target_mem_write16(target, addr, value);
-
-	/* Wait for completion or an error */
-	const bool result = ch32v3x_flash_busy_wait(target, FLASH_BANK1_OFFSET, NULL);
-	if (result || offset != 0U)
-		return result;
-	/*
-	 * In the case that the write failed and we're handling option byte 0 (RDP),
-	 * check if we got a status of "Program Error" in FLASH_SR, indicating the target
-	 * refused to erase the read protection option bytes (and turn it into a truthy return).
-	 */
-	const uint8_t status = target_mem_read32(target, FLASH_SR) & SR_ERROR_MASK;
-	return status == SR_PROG_ERROR;
-}
-
-static bool ch32v3x_option_write(target_s *const target, const uint32_t addr, const uint16_t value)
-{
-	const uint32_t index = (addr - FLASH_OBP_RDP) >> 1U;
-	/* If index would be negative, the high most bit is set, so we get a giant positive number. */
-	if (index > 7U)
-		return false;
-
-	uint16_t opt_val[8];
-	/* Retrieve old values */
-	for (size_t i = 0U; i < 16U; i += 4U) {
-		const size_t offset = i >> 1U;
-		uint32_t val = target_mem_read32(target, FLASH_OBP_RDP + i);
-		opt_val[offset] = val & 0xffffU;
-		opt_val[offset + 1U] = val >> 16U;
-	}
-
-	if (opt_val[index] == value)
-		return true;
-
-	/* Check for erased value */
-	if (opt_val[index] != 0xffffU && !ch32v3x_option_erase(target))
-		return false;
-	opt_val[index] = value;
-
-	/*
-	 * Write changed values, taking into account if we can use 32- or have to use 16-bit writes.
-	 * GD32E230 is a special case as target_mem_write16 does not work
-	 */
-	const bool write16_broken = target->part_id == 0x410U && (target->cpuid & CPUID_PARTNO_MASK) == CORTEX_M23;
-	for (size_t i = 0U; i < 8U; ++i) {
-		if (!ch32v3x_option_write_erased(target, i, opt_val[i], write16_broken))
-			return false;
-	}
-
-	return true;
-}
-
-static bool ch32v3x_cmd_option(target_s *target, int argc, const char **argv)
-{
-	const uint32_t read_protected = target_mem_read32(target, FLASH_OBR) & FLASH_OBR_RDPRT;
-	const bool erase_requested = argc == 2 && strcmp(argv[1], "erase") == 0;
-	/* Fast-exit if the Flash is not readable and the user didn't ask us to erase the option bytes */
-	if (read_protected && !erase_requested) {
-		tc_printf(target, "Device is Read Protected\nUse `monitor option erase` to unprotect and erase device\n");
-		return true;
-	}
-
-	/* Unprotect the option bytes so we can modify them */
-	if (!ch32v3x_flash_unlock(target, FLASH_BANK1_OFFSET))
-		return false;
-	target_mem_write32(target, FLASH_OPTKEYR, KEY1);
-	target_mem_write32(target, FLASH_OPTKEYR, KEY2);
-
-	if (erase_requested) {
-		/* When the user asks us to erase the option bytes, kick of an erase */
-		if (!ch32v3x_option_erase(target))
-			return false;
-		/*
-		 * Write the option bytes Flash readable key, taking into account if we can
-		 * use 32- or have to use 16-bit writes.
-		 * GD32E230 is a special case as target_mem_write16 does not work
-		 */
-		const bool write16_broken = target->part_id == 0x410U && (target->cpuid & CPUID_PARTNO_MASK) == CORTEX_M23;
-		if (!ch32v3x_option_write_erased(target, 0U, ch32v3x_flash_readable_key(target), write16_broken))
-			return false;
-	} else if (argc == 3) {
-		/* If 3 arguments are given, assume the second is an address, and the third a value */
-		const uint32_t addr = strtoul(argv[1], NULL, 0);
-		const uint32_t val = strtoul(argv[2], NULL, 0);
-		/* Try and program the new option value to the requested option byte */
-		if (!ch32v3x_option_write(target, addr, val))
-			return false;
-	} else
-		tc_printf(target, "usage: monitor option erase\nusage: monitor option <addr> <value>\n");
-
-	/* When all gets said and done, display the current option bytes values */
-	for (size_t i = 0U; i < 16U; i += 4U) {
-		const uint32_t addr = FLASH_OBP_RDP + i;
-		const uint32_t val = target_mem_read32(target, addr);
-		tc_printf(target, "0x%08X: 0x%04X\n", addr, val & 0xffffU);
-		tc_printf(target, "0x%08X: 0x%04X\n", addr + 2U, val >> 16U);
-	}
-
-	return true;
-}
-#endif
+//
