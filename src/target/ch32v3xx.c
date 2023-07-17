@@ -57,9 +57,14 @@ typedef struct {
 #define CH32V3XX_FLASH_CONTROLLER_ADDRESS 0x40022000
 #define CH32V3XX_UID1                     0x1ffff7e8 // Low bits of UUID
 
+#define CH32V3XX_FMC_CTL_START           (1 << 6)
 #define CH32V3XX_FMC_CTL_LK              (1 << 7)
 #define CH32V3XX_FMC_CTL_CH32_FASTUNLOCK (1 << 15)
 #define CH32V3XX_FMC_CTL_CH32_FASTERASE  (1 << 17)
+
+#define CH32V3XX_FMC_STAT_BUSY    (1 << 0)
+#define CH32V3XX_FMC_STAT_WR_BUSY (1 << 1)
+#define CH32V3XX_FMC_STAT_WP_ENDF (1 << 5) // end of operation
 
 #define CH32V3XX_KEY1 0x45670123
 #define CH32V3XX_KEY2 0xcdef89ab
@@ -148,13 +153,59 @@ static bool ch32v3x_fast_unlock(target_s *target)
 	return !(v & CH32V3XX_FMC_CTL_CH32_FASTUNLOCK);
 }
 
+static void ch32v3x_wait_not_busy(target_flash_s *flash)
+{
+	// is it busy  ?
+	while (1) {
+		uint32_t s = READ_FLASH_REG(flash->t, statr);
+		if (!(s & CH32V3XX_FMC_STAT_BUSY))
+			return;
+	}
+}
+#if 0
+static void ch32v3x_wait_not_wr_busy(target_s *target)
+{
+    // is it wrbusy  ?
+    while (1)
+    {
+       uint32_t s =  READ_FLASH_REG(target, statr);
+        if (!(s & CH32V3XX_FMC_STAT_WR_BUSY))
+            return;
+    }
+}
+#endif
 /*
 */
-static bool ch32v3x_fast_lock(target_s *target)
+static void ch32v3x_ctl_set(target_flash_s *flash, uint32_t bits)
 {
-	uint32_t v = READ_FLASH_REG(target, ctlr);
-	v |= CH32V3XX_FMC_CTL_LK;
-	WRITE_FLASH_REG(target, ctlr, v);
+	uint32_t v = READ_FLASH_REG(flash->t, ctlr);
+	v |= bits;
+	WRITE_FLASH_REG(flash->t, ctlr, v);
+}
+
+/*
+*/
+static void ch32v3x_ctl_clear(target_flash_s *flash, uint32_t bits)
+{
+	uint32_t v = READ_FLASH_REG(flash->t, ctlr);
+	v &= ~bits;
+	WRITE_FLASH_REG(flash->t, ctlr, v);
+}
+
+/**
+*/
+static void ch32v3x_stat_clear(target_flash_s *flash, uint32_t bits)
+{
+	uint32_t v = READ_FLASH_REG(flash->t, statr);
+	v &= ~bits;
+	WRITE_FLASH_REG(flash->t, statr, v);
+}
+
+/*
+*/
+static bool ch32v3x_fast_lock(target_flash_s *flash)
+{
+	ch32v3x_ctl_set(flash, CH32V3XX_FMC_CTL_LK);
 	return true;
 }
 
@@ -166,8 +217,21 @@ static bool ch32v3x_flash_erase(target_flash_s *flash, target_addr_t addr, size_
 	(void)addr;
 	(void)len;
 	ch32v3x_fast_unlock(flash->t);
-	ch32v3x_fast_lock(flash->t);
-	return false;
+
+	uint32_t cur_addr = addr;
+	uint32_t end_addr = cur_addr + len;
+	while (cur_addr < end_addr) {
+		ch32v3x_ctl_set(flash, CH32V3XX_FMC_CTL_CH32_FASTERASE);
+		WRITE_FLASH_REG(flash->t, addr, cur_addr);
+		ch32v3x_ctl_set(flash, CH32V3XX_FMC_CTL_START);
+		ch32v3x_wait_not_busy(flash);
+		cur_addr += 256;
+		ch32v3x_stat_clear(flash, CH32V3XX_FMC_STAT_WP_ENDF); // clear end of process bit
+		ch32v3x_ctl_clear(flash, CH32V3XX_FMC_CTL_CH32_FASTERASE);
+		ch32v3x_ctl_clear(flash, CH32V3XX_FMC_CTL_START);
+	}
+	ch32v3x_fast_lock(flash);
+	return true;
 }
 
 /*
