@@ -40,9 +40,23 @@
 #include "target.h"
 #include "target_internal.h"
 #include "cortexm.h"
-#include "jep106.h"
 
-//static bool ch32v3x_cmd_option(target_s *target, int argc, const char **argv);
+typedef struct {
+	uint32_t fpec;   //4
+	uint32_t obkey;  // 8
+	uint32_t statr;  // C
+	uint32_t ctlr;   // 10
+	uint32_t addr;   //14
+	uint32_t filler; //18
+	uint32_t obr;    // 1C
+} ch32_flash_s;
+
+#define CH32V3XX_FLASH_CONTROLLER_ADDRESS 0x40022004
+
+#define READ_FLASH_REG(target, reg) \
+	target_mem_read32(target, CH32V3XX_FLASH_CONTROLLER_ADDRESS + offsetof(ch32_flash_s, reg))
+#define WRITE_FLASH_REG(target, reg, value) \
+	target_mem_write32(target, CH32V3XX_FLASH_CONTROLLER_ADDRESS + offsetof(ch32_flash_s, reg, value))
 
 const command_s ch32v3x_cmd_list[] = {
 	{NULL, NULL, NULL},
@@ -50,8 +64,6 @@ const command_s ch32v3x_cmd_list[] = {
 
 static bool ch32v3x_flash_erase(target_flash_s *flash, target_addr_t addr, size_t len);
 static bool ch32v3x_flash_write(target_flash_s *flash, target_addr_t dest, const void *src, size_t len);
-
-//static bool ch32v3x_mass_erase(target_s *target);
 
 static void ch32v3x_add_flash(target_s *target, uint32_t addr, size_t length, size_t erasesize)
 {
@@ -82,25 +94,37 @@ static uint16_t ch32v3x_read_idcode(target_s *const target)
 bool ch32v3xx_probe(target_s *target)
 {
 	const uint16_t device_id = ch32v3x_read_idcode(target);
-	size_t block_size = 0x400;
+	int flash_size = 0;
+	int ram_size = 0;
+	size_t block_size = 256;
 
 	switch (device_id) {
-	case 0x000U: /* Gigadevice gd32f303 */
+	case 0x000U: // TODO
 		target->driver = "CH32V3XX";
 		break;
 	default:
 		return false;
 	}
-#if 0
-	const uint32_t signature = target_mem_read32(target, GD32Fx_FLASHSIZE);
-	const uint16_t flash_size = signature & 0xffffU;
-	const uint16_t ram_size = signature >> 16U;
+	uint32_t obr = READ_FLASH_REG(target, obr);
+	obr = (obr >> 8) & 3; // SRAM_CODE_MODE
 
-	target->part_id = device_id;
-	target->mass_erase = ch32v3x_mass_erase;
-#endif
-	int ram_size = 64;
-	int flash_size = 256;
+#define MEMORY_CONFIG(x, flash, ram) \
+	case x: {                        \
+		flash_size = flash;          \
+		ram_size = ram;              \
+	}; break;
+	switch (obr) // See 32.4.6
+	{
+		MEMORY_CONFIG(0, 192, 128)
+		MEMORY_CONFIG(1, 224, 96)
+		MEMORY_CONFIG(2, 256, 64)
+		MEMORY_CONFIG(3, 288, 32)
+	default:
+		flash_size = 128; // ?
+		ram_size = 32;
+		break;
+	}
+
 	target_add_ram(target, 0x20000000, ram_size * 1024U);
 	ch32v3x_add_flash(target, 0x0, (size_t)flash_size * 1024U, block_size);
 	target_add_commands(target, ch32v3x_cmd_list, target->driver);
