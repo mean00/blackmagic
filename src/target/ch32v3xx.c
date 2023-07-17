@@ -52,6 +52,7 @@ typedef struct {
 } ch32_flash_s;
 
 #define CH32V3XX_FLASH_CONTROLLER_ADDRESS 0x40022004
+#define CH32V3XX_UID1                     0x1ffff7e8 // Low bits of UUID
 
 #define READ_FLASH_REG(target, reg) \
 	target_mem_read32(target, CH32V3XX_FLASH_CONTROLLER_ADDRESS + offsetof(ch32_flash_s, reg))
@@ -83,28 +84,15 @@ static void ch32v3x_add_flash(target_s *target, uint32_t addr, size_t length, si
 	target_add_flash(target, flash);
 }
 
-static uint16_t ch32v3x_read_idcode(target_s *const target)
-{
-	(void)target;
-	//		return target_mem_read32(target, DBGMCU_IDCODE_F0) & 0xfffU;
-	return 0;
-}
-
 /* Identify ch32v3x */
 bool ch32v3xx_probe(target_s *target)
 {
-	const uint16_t device_id = ch32v3x_read_idcode(target);
 	int flash_size = 0;
 	int ram_size = 0;
 	size_t block_size = 256;
 
-	switch (device_id) {
-	case 0x000U: // TODO
-		target->driver = "CH32V3XX";
-		break;
-	default:
-		return false;
-	}
+	target->driver = "CH32V3XX";
+
 	uint32_t obr = READ_FLASH_REG(target, obr);
 	obr = (obr >> 8) & 3; // SRAM_CODE_MODE
 
