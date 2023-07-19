@@ -19,55 +19,45 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-/*
- * This file implements STM32 target specific functions for detecting
- * the device, providing the XML memory map and Flash memory programming.
- *
- * References:
- * ST doc - RM0008
- *   Reference manual - ch32v3x01xx, ch32v3x02xx, ch32v3x03xx, ch32v3x05xx
- *   and ch32v3x07xx advanced ARM-based 32-bit MCUs
- * ST doc - RM0091
- *   Reference manual - STM32F0x1/STM32F0x2/STM32F0x8
- *   advanced ARM®-based 32-bit MCUs
- * ST doc - RM0360
- *   Reference manual - STM32F030x4/x6/x8/xC and STM32F070x6/xB
- * ST doc - PM0075
- *   Programming manual - ch32v3x0xxx Flash memory microcontrollers
- */
-
 #include "general.h"
 #include "target.h"
 #include "target_internal.h"
 #include "cortexm.h"
+#define VERIFY 1
 
 typedef struct {
-	uint32_t ws;      // 0
-	uint32_t key;     //4 aka fpec
-	uint32_t obkey;   // 8
-	uint32_t statr;   // C
-	uint32_t ctlr;    // 10
-	uint32_t addr;    //14
-	uint32_t filler;  //18
-	uint32_t obr;     // 1C
-	uint32_t wpr;     // 20
-	uint32_t modekey; // 24
+	uint32_t WS;       // 0
+	uint32_t KEYR;     // 4 aka fpec
+	uint32_t OBKEYR;   // 8
+	uint32_t STATR;    // C
+	uint32_t CTLR;     // 10
+	uint32_t ADDR;     // 14
+	uint32_t filler;   // 18
+	uint32_t OBR;      // 1C
+	uint32_t WPR;      // 20
+	uint32_t MODEKEYR; // 24
 } ch32_flash_s;
 
 #define CH32V3XX_FLASH_CONTROLLER_ADDRESS 0x40022000
 #define CH32V3XX_UID1                     0x1ffff7e8 // Low bits of UUID
-
-#define CH32V3XX_FMC_CTL_START           (1 << 6)
-#define CH32V3XX_FMC_CTL_LK              (1 << 7)
-#define CH32V3XX_FMC_CTL_CH32_FASTUNLOCK (1 << 15)
-#define CH32V3XX_FMC_CTL_CH32_FASTERASE  (1 << 17)
+#define CH32V3XX_FMC_CTL_PG               (1 << 0)   // program command
+#define CH32V3XX_FMC_CTL_PER              (1 << 1)   // page erase command
+#define CH32V3XX_FMC_CTL_START            (1 << 6)
+#define CH32V3XX_FMC_CTL_LK               (1 << 7)
+#define CH32V3XX_FMC_CTL_CH32_FASTUNLOCK  (1 << 15)
+#define CH32V3XX_FMC_CTL_CH32_FASTPROGRAM (1 << 16)
+#define CH32V3XX_FMC_CTL_CH32_FASTERASE   (1 << 17)
+#define CH32V3XX_FMC_CTL_CH32_FASTSTART   (1 << 21)
 
 #define CH32V3XX_FMC_STAT_BUSY    (1 << 0)
 #define CH32V3XX_FMC_STAT_WR_BUSY (1 << 1)
+#define CH32V3XX_FMC_STAT_WP_ERR  (1 << 4) // erase / program erro
 #define CH32V3XX_FMC_STAT_WP_ENDF (1 << 5) // end of operation
+#define CH32V3XX_FMC_STAT_PG_ERR  (1 << 3) // program error
+#define CH32V3XX_FMC_STAT_WP_ERR  (1 << 4) // erase / program erro
 
-#define CH32V3XX_KEY1 0x45670123
-#define CH32V3XX_KEY2 0xcdef89ab
+#define CH32V3XX_KEY1 0x45670123UL
+#define CH32V3XX_KEY2 0xcdef89abUL
 
 #define READ_FLASH_REG(target, reg) \
 	target_mem_read32(target, CH32V3XX_FLASH_CONTROLLER_ADDRESS + offsetof(ch32_flash_s, reg))
@@ -110,7 +100,15 @@ bool ch32v3xx_probe(target_s *target)
 
 	target->driver = "CH32V3XX";
 
-	uint32_t obr = READ_FLASH_REG(target, obr);
+	uint32_t obr = READ_FLASH_REG(target, OBR);
+
+#ifdef VERIFY
+	int i;
+	for (i = 0; i < 32; i += 4) {
+		printf("Offset : 0x%0x : 0x%x\n", i, target_mem_read32(target, CH32V3XX_FLASH_CONTROLLER_ADDRESS + i));
+	}
+
+#endif
 	obr = (obr >> 8) & 3; // SRAM_CODE_MODE
 
 #define MEMORY_CONFIG(x, flash, ram) \
@@ -141,15 +139,18 @@ bool ch32v3xx_probe(target_s *target)
 */
 static bool ch32v3x_fast_unlock(target_s *target)
 {
+	uint32_t ctl = READ_FLASH_REG(target, CTLR);
+	if (!(ctl & CH32V3XX_FMC_CTL_LK)) // already unlocked
+		return true;
 	// send unlock sequence
-	WRITE_FLASH_REG(target, key, CH32V3XX_KEY1);
-	WRITE_FLASH_REG(target, key, CH32V3XX_KEY2);
+	WRITE_FLASH_REG(target, KEYR, CH32V3XX_KEY1);
+	WRITE_FLASH_REG(target, KEYR, CH32V3XX_KEY2);
 
 	// send fast unlock sequence
-	WRITE_FLASH_REG(target, modekey, CH32V3XX_KEY1);
-	WRITE_FLASH_REG(target, modekey, CH32V3XX_KEY2);
+	WRITE_FLASH_REG(target, MODEKEYR, CH32V3XX_KEY1);
+	WRITE_FLASH_REG(target, MODEKEYR, CH32V3XX_KEY2);
 
-	uint32_t v = READ_FLASH_REG(target, ctlr);
+	uint32_t v = READ_FLASH_REG(target, CTLR);
 	return !(v & CH32V3XX_FMC_CTL_CH32_FASTUNLOCK);
 }
 
@@ -157,55 +158,64 @@ static void ch32v3x_wait_not_busy(target_flash_s *flash)
 {
 	// is it busy  ?
 	while (1) {
-		uint32_t s = READ_FLASH_REG(flash->t, statr);
+		uint32_t s = READ_FLASH_REG(flash->t, STATR);
 		if (!(s & CH32V3XX_FMC_STAT_BUSY))
 			return;
 	}
 }
-#if 0
-static void ch32v3x_wait_not_wr_busy(target_s *target)
+
+static void ch32v3x_wait_not_wr_busy(target_flash_s *flash)
 {
-    // is it wrbusy  ?
-    while (1)
-    {
-       uint32_t s =  READ_FLASH_REG(target, statr);
-        if (!(s & CH32V3XX_FMC_STAT_WR_BUSY))
-            return;
-    }
+	// is it wrbusy  ?
+	while (1) {
+		uint32_t s = READ_FLASH_REG(flash->t, STATR);
+		if (!(s & CH32V3XX_FMC_STAT_WR_BUSY))
+			return;
+	}
 }
-#endif
+
 /*
 */
 static void ch32v3x_ctl_set(target_flash_s *flash, uint32_t bits)
 {
-	uint32_t v = READ_FLASH_REG(flash->t, ctlr);
+	uint32_t v = READ_FLASH_REG(flash->t, CTLR);
 	v |= bits;
-	WRITE_FLASH_REG(flash->t, ctlr, v);
+	WRITE_FLASH_REG(flash->t, CTLR, v);
 }
 
 /*
 */
 static void ch32v3x_ctl_clear(target_flash_s *flash, uint32_t bits)
 {
-	uint32_t v = READ_FLASH_REG(flash->t, ctlr);
+	uint32_t v = READ_FLASH_REG(flash->t, CTLR);
 	v &= ~bits;
-	WRITE_FLASH_REG(flash->t, ctlr, v);
+	WRITE_FLASH_REG(flash->t, CTLR, v);
 }
 
 /**
 */
-static void ch32v3x_stat_clear(target_flash_s *flash, uint32_t bits)
+static void ch32v3x_stat_set(target_flash_s *flash, uint32_t bits)
 {
-	uint32_t v = READ_FLASH_REG(flash->t, statr);
-	v &= ~bits;
-	WRITE_FLASH_REG(flash->t, statr, v);
+	uint32_t v = READ_FLASH_REG(flash->t, STATR);
+	v |= bits;
+	WRITE_FLASH_REG(flash->t, STATR, v);
 }
 
+/**
+
+static void ch32v3x_stat_clear(target_flash_s *flash, uint32_t bits)
+{
+	uint32_t v = READ_FLASH_REG(flash->t, STATR);
+	v &= ~bits;
+	WRITE_FLASH_REG(flash->t, STATR, v);
+}
+*/
 /*
 */
 static bool ch32v3x_fast_lock(target_flash_s *flash)
 {
-	ch32v3x_ctl_set(flash, CH32V3XX_FMC_CTL_LK);
+	(void)flash;
+	//ch32v3x_ctl_set(flash, CH32V3XX_FMC_CTL_LK);
 	return true;
 }
 
@@ -222,13 +232,24 @@ static bool ch32v3x_flash_erase(target_flash_s *flash, target_addr_t addr, size_
 	uint32_t end_addr = cur_addr + len;
 	while (cur_addr < end_addr) {
 		ch32v3x_ctl_set(flash, CH32V3XX_FMC_CTL_CH32_FASTERASE);
-		WRITE_FLASH_REG(flash->t, addr, cur_addr);
+		WRITE_FLASH_REG(flash->t, ADDR, cur_addr);
 		ch32v3x_ctl_set(flash, CH32V3XX_FMC_CTL_START);
 		ch32v3x_wait_not_busy(flash);
-		cur_addr += 256;
-		ch32v3x_stat_clear(flash, CH32V3XX_FMC_STAT_WP_ENDF); // clear end of process bit
+		ch32v3x_stat_set(flash, CH32V3XX_FMC_STAT_WP_ENDF); // clear end of process bit
 		ch32v3x_ctl_clear(flash, CH32V3XX_FMC_CTL_CH32_FASTERASE);
-		ch32v3x_ctl_clear(flash, CH32V3XX_FMC_CTL_START);
+#ifdef VERIFY
+		uint32_t a;
+		for (a = 0; a < 256; a += 4) {
+			uint32_t s = target_mem_read32(flash->t, cur_addr + a);
+			if (s != 0xe339e339UL) //the wch does not fill the flash with ff !
+			{
+				printf("******Bad erase at address %x\n", cur_addr + a);
+				ch32v3x_fast_lock(flash);
+				return false;
+			}
+		}
+#endif
+		cur_addr += 256;
 	}
 	ch32v3x_fast_lock(flash);
 	return true;
@@ -236,13 +257,44 @@ static bool ch32v3x_flash_erase(target_flash_s *flash, target_addr_t addr, size_
 
 /*
 */
-static bool ch32v3x_flash_write(target_flash_s *flash, target_addr_t dest, const void *src, size_t len)
+static bool ch32v3x_flash_write(target_flash_s *flash, target_addr_t dest, const void *srcx, size_t len)
 {
-	(void)flash;
-	(void)dest;
-	(void)src;
-	(void)len;
-	return false;
+	uint32_t cur_addr = dest;
+	const uint8_t *src = (const uint8_t *)srcx;
+	// Warning : it is assumed address is 8 bytes aligned TODO TODO
+	cur_addr += 0x08000000; // some leftover from older chip it seems
+
+	uint32_t end_addr = cur_addr + len;
+	while (cur_addr < end_addr) {
+		ch32v3x_ctl_set(flash, CH32V3XX_FMC_CTL_CH32_FASTPROGRAM);
+		ch32v3x_wait_not_busy(flash);
+		// prefill write cache, we write 256 bytes at a time
+		for (int i = 0; i < 64; i++) {
+			uint32_t data32 = (src[0]) + (src[1] << 8) + (src[2] << 16) + (src[3] << 24);
+			target_mem_write32(flash->t, cur_addr, data32);
+			src += 4;
+			cur_addr += 4;
+			ch32v3x_wait_not_wr_busy(flash);
+		}
+		// and flush
+		ch32v3x_ctl_set(flash, CH32V3XX_FMC_CTL_CH32_FASTSTART); // and go
+		ch32v3x_wait_not_busy(flash);
+
+		ch32v3x_ctl_clear(flash, CH32V3XX_FMC_CTL_PG); // done
+		uint32_t stat = READ_FLASH_REG(flash->t, STATR);
+		if (stat & (CH32V3XX_FMC_STAT_PG_ERR + CH32V3XX_FMC_STAT_WP_ERR)) {
+			ch32v3x_stat_set(flash, CH32V3XX_FMC_STAT_PG_ERR + CH32V3XX_FMC_STAT_WP_ERR); // clear error
+			printf("Write error at offset 0x%x", cur_addr);
+			return false;
+		}
+		ch32v3x_stat_set(flash, CH32V3XX_FMC_STAT_WP_ENDF); // done tODO TODO
+		if (!(stat & CH32V3XX_FMC_STAT_WP_ENDF)) {
+			printf("Write error 2 at offset 0x%x", cur_addr);
+			return false;
+		}
+	}
+	//
+	return true;
 }
 
 //
