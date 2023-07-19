@@ -229,13 +229,14 @@ static bool ch32v3x_flash_erase(target_flash_s *flash, target_addr_t addr, size_
 	ch32v3x_fast_unlock(flash->t);
 
 	uint32_t cur_addr = addr;
+	cur_addr += 0x08000000; // some leftover from older chip it seems
 	uint32_t end_addr = cur_addr + len;
 	while (cur_addr < end_addr) {
 		ch32v3x_ctl_set(flash, CH32V3XX_FMC_CTL_CH32_FASTERASE);
 		WRITE_FLASH_REG(flash->t, ADDR, cur_addr);
 		ch32v3x_ctl_set(flash, CH32V3XX_FMC_CTL_START);
 		ch32v3x_wait_not_busy(flash);
-		ch32v3x_stat_set(flash, CH32V3XX_FMC_STAT_WP_ENDF); // clear end of process bit
+		//ch32v3x_stat_set(flash, CH32V3XX_FMC_STAT_WP_ENDF); // clear end of process bit
 		ch32v3x_ctl_clear(flash, CH32V3XX_FMC_CTL_CH32_FASTERASE);
 #ifdef VERIFY
 		uint32_t a;
@@ -251,7 +252,7 @@ static bool ch32v3x_flash_erase(target_flash_s *flash, target_addr_t addr, size_
 #endif
 		cur_addr += 256;
 	}
-	ch32v3x_fast_lock(flash);
+	//ch32v3x_fast_lock(flash);
 	return true;
 }
 
