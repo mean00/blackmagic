@@ -59,6 +59,11 @@ typedef struct {
 #define CH32V3XX_KEY1 0x45670123UL
 #define CH32V3XX_KEY2 0xcdef89abUL
 
+/* RISC-V targets CH32Vx */
+#define CH32VX_CHIPID               0x1ffff704U
+#define CH32VX_CHIPID_FAMILY_OFFSET 20U
+#define CH32VX_CHIPID_FAMILY_MASK   (0xfffU << CH32VX_CHIPID_FAMILY_OFFSET)
+
 #define READ_FLASH_REG(target, reg) \
 	target_mem_read32(target, CH32V3XX_FLASH_CONTROLLER_ADDRESS + offsetof(ch32_flash_s, reg))
 #define WRITE_FLASH_REG(target, reg, value) \
@@ -91,24 +96,67 @@ static void ch32v3x_add_flash(target_s *target, uint32_t addr, size_t length, si
 	target_add_flash(target, flash);
 }
 
-/* Identify ch32v3x */
+/* 
+	Identify ch32vxx 
+*/
 bool ch32v3xx_probe(target_s *target)
 {
 	int flash_size = 0;
 	int ram_size = 0;
 	size_t block_size = 256;
+	/* CHIPID table
+ *	CH32V303CBT6: 0x303305x4
+ *	CH32V303RBT6: 0x303205x4
+ *	CH32V303RCT6: 0x303105x4
+ *	CH32V303VCT6: 0x303005x4
+ *	CH32V305FBP6: 0x305205x8
+ *	CH32V305RBT6: 0x305005x8
+ *	CH32V307WCU6: 0x307305x8
+ *	CH32V307FBP6: 0x307205x8
+ *	CH32V307RCT6: 0x307105x8
+ *	CH32V307VCT6: 0x307005x8
+ */
 
-	target->driver = "CH32V3XX";
-
-	uint32_t obr = READ_FLASH_REG(target, OBR);
-
-#ifdef VERIFY
-	int i;
-	for (i = 0; i < 32; i += 4) {
-		printf("Offset : 0x%0x : 0x%x\n", i, target_mem_read32(target, CH32V3XX_FLASH_CONTROLLER_ADDRESS + i));
+	const uint32_t chipid = target_mem_read32(target, CH32VX_CHIPID);
+	switch (chipid & 0xffffff0f) {
+	case 0x30330504U: /* CH32V303CBT6 */
+	case 0x30320504U: /* CH32V303RBT6 */
+	case 0x30310504U: /* CH32V303RCT6 */
+	case 0x30300504U: /* CH32V303VCT6 */
+	case 0x30520508U: /* CH32V305FBP6 */
+	case 0x30500508U: /* CH32V305RBT6 */
+	case 0x30730508U: /* CH32V307WCU6 */
+	case 0x30720508U: /* CH32V307FBP6 */
+	case 0x30710508U: /* CH32V307RCT6 */
+	case 0x30700508U: /* CH32V307VCT6 */
+		break;
+	default:
+		return false;
+		break;
 	}
 
-#endif
+	DEBUG_WARN("CH32V CHIPID 0x%" PRIx32 " \n", chipid);
+
+	const uint16_t family = (chipid & CH32VX_CHIPID_FAMILY_MASK) >> CH32VX_CHIPID_FAMILY_OFFSET;
+	switch (family) {
+	case 0x303U:
+		target->driver = "CH32V303";
+		break;
+	case 0x305U:
+		target->driver = "CH32V305";
+		break;
+	case 0x307U:
+		target->driver = "CH32V307";
+		break;
+	default:
+		return false;
+		break;
+	}
+	DEBUG_WARN("CH32V family 0x%" PRIx32 " \n", family);
+
+	target->part_id = chipid;
+
+	uint32_t obr = READ_FLASH_REG(target, OBR);
 	obr = (obr >> 8) & 3; // SRAM_CODE_MODE
 
 #define MEMORY_CONFIG(x, flash, ram) \
@@ -127,7 +175,7 @@ bool ch32v3xx_probe(target_s *target)
 		ram_size = 32;
 		break;
 	}
-
+	DEBUG_WARN("CH32V flash %d kB, ram %d kB\n", flash_size, ram_size);
 	target_add_ram(target, 0x20000000, ram_size * 1024U);
 	ch32v3x_add_flash(target, 0x0, (size_t)flash_size * 1024U, block_size);
 	target_add_commands(target, ch32v3x_cmd_list, target->driver);
