@@ -23,7 +23,16 @@
 #include "target.h"
 #include "target_internal.h"
 #include "cortexm.h"
-#define VERIFY 1
+
+#if PC_HOSTED == 1
+#define debug printf
+#else
+#define debug(...) \
+	{              \
+	}
+#endif
+
+//#define VERIFY 1
 
 typedef struct {
 	uint32_t WS;       // 0
@@ -260,13 +269,14 @@ static void ch32v3x_stat_clear(target_flash_s *flash, uint32_t bits)
 */
 /*
 */
+#if 0
 static bool ch32v3x_fast_lock(target_flash_s *flash)
 {
 	(void)flash;
 	//ch32v3x_ctl_set(flash, CH32V3XX_FMC_CTL_LK);
 	return true;
 }
-
+#endif
 /*
 */
 static bool ch32v3x_flash_erase(target_flash_s *flash, target_addr_t addr, size_t len)
@@ -333,12 +343,12 @@ static bool ch32v3x_flash_write(target_flash_s *flash, target_addr_t dest, const
 		uint32_t stat = READ_FLASH_REG(flash->t, STATR);
 		if (stat & (CH32V3XX_FMC_STAT_PG_ERR + CH32V3XX_FMC_STAT_WP_ERR)) {
 			ch32v3x_stat_set(flash, CH32V3XX_FMC_STAT_PG_ERR + CH32V3XX_FMC_STAT_WP_ERR); // clear error
-			printf("Write error at offset 0x%x", cur_addr);
+			debug("Write error at offset 0x%x", cur_addr);
 			return false;
 		}
 		ch32v3x_stat_set(flash, CH32V3XX_FMC_STAT_WP_ENDF); // done tODO TODO
 		if (!(stat & CH32V3XX_FMC_STAT_WP_ENDF)) {
-			printf("Write error 2 at offset 0x%x", cur_addr);
+			debug("Write error 2 at offset 0x%x", cur_addr);
 			return false;
 		}
 	}
