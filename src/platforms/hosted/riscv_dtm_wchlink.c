@@ -2,7 +2,7 @@
  * This file is part of the Black Magic Debug project.
  *
  * Copyright (C) 2023 1BitSquared <info@1bitsquared.com>
- * Written by Rachel Mant <git@dragonmux.network>
+ * Written by Rafael Silva <perigoso@riseup.net>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -31,66 +31,46 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <stdarg.h>
+#include "bmp_hosted.h"
 #include "general.h"
-#include "debug.h"
+#include "jep106.h"
+#include "riscv_debug.h"
+#include "target_probe.h"
+#include "target.h"
+#include "wchlink.h"
 
-uint16_t bmda_debug_flags = 0xffffU; //BMD_DEBUG_ERROR | BMD_DEBUG_WARNING;
+void riscv_dtm_wchlink_init(riscv_dm_s *dtm);
 
-static void debug_print(const uint16_t level, const char *format, va_list args)
+static bool riscv_dtm_wchlink_dmi_read(riscv_dmi_s *const dmi, const uint32_t address, uint32_t *const value)
 {
-	/* Check if the required level is enabled */
-	if (!(bmda_debug_flags & level))
-		return;
-	/* Check to see which of stderr and stdout the message should go to */
-	FILE *const where = bmda_debug_flags & BMD_DEBUG_USE_STDERR ? stderr : stdout;
-	/* And shoot the message to the correct place */
-	(void)vfprintf(where, format, args);
-	/* Note: we have no useful way to use the output of the above call, so we ignore it. */
+	(void)dmi;
+	return wchlink_riscv_dmi_read(&info, address, value);
 }
 
-#define DEBUG_PRINT(level)              \
-	va_list args;                       \
-	va_start(args, format);             \
-	debug_print((level), format, args); \
-	va_end(args)
-
-void debug_error(const char *format, ...)
+static bool riscv_dtm_wchlink_dmi_write(riscv_dmi_s *const dmi, const uint32_t address, const uint32_t value)
 {
-	DEBUG_PRINT(BMD_DEBUG_ERROR);
+	(void)dmi;
+	return wchlink_riscv_dmi_write(&info, address, value);
 }
 
-void debug_warning(const char *format, ...)
+uint8_t riscv_dtm_wchlink_handler()
 {
-	DEBUG_PRINT(BMD_DEBUG_WARNING);
-}
-
-void debug_info(const char *format, ...)
-{
-	DEBUG_PRINT(BMD_DEBUG_INFO);
-}
-
-void debug_gdb(const char *format, ...)
-{
-	DEBUG_PRINT(BMD_DEBUG_GDB);
-}
-
-void debug_target(const char *format, ...)
-{
-	DEBUG_PRINT(BMD_DEBUG_TARGET);
-}
-
-void debug_protocol(const char *format, ...)
-{
-	DEBUG_PRINT(BMD_DEBUG_PROTO);
-}
-
-void debug_probe(const char *format, ...)
-{
-	DEBUG_PRINT(BMD_DEBUG_PROBE);
-}
-
-void debug_wire(const char *format, ...)
-{
-	DEBUG_PRINT(BMD_DEBUG_WIRE);
+	riscv_dmi_s *dmi_bus = calloc(1, sizeof(*dmi_bus));
+	if (!dmi_bus) {
+		DEBUG_WARN("calloc: failed in %s\n", __func__);
+		return 0;
+	}
+	dmi_bus->read = riscv_dtm_wchlink_dmi_read;
+	dmi_bus->write = riscv_dtm_wchlink_dmi_write;
+	dmi_bus->version = RISCV_DEBUG_0_13;
+	dmi_bus->designer_code =
+		JEP106_MANUFACTURER_WCH; /* fixme: WCHLINK deosn't seem to have a jep106 code assigned this is a dummy code */
+	
+	/* Call higher level code to discover the DMI bus */		
+	riscv_dmi_init(dmi_bus);
+	uint8_t c=dmi_bus->ref_count;
+	if (!dmi_bus->ref_count) {
+		free(dmi_bus);		
+	}	
+	return c;	
 }

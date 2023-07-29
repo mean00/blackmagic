@@ -75,6 +75,7 @@ void platform_buffer_flush(void);
 
 #define VENDOR_ID_ORBCODE   0x1209U
 #define PRODUCT_ID_ORBTRACE 0x3443U
+#define VENDOR_ID_WCH       0x1a86U
 
 typedef enum bmp_type_e {
 	BMP_TYPE_NONE = 0,
@@ -82,7 +83,8 @@ typedef enum bmp_type_e {
 	BMP_TYPE_STLINK_V2,
 	BMP_TYPE_FTDI,
 	BMP_TYPE_CMSIS_DAP,
-	BMP_TYPE_JLINK
+	BMP_TYPE_JLINK,
+	BMP_TYPE_WCHLINK
 } bmp_type_t;
 
 void gdb_ident(char *p, int count);

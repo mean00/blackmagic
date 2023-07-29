@@ -1,9 +1,8 @@
 /*
  * This file is part of the Black Magic Debug project.
  *
- * Copyright (C) 2023 1BitSquared <info@1bitsquared.com>
- * Written by Rachel Mant <git@dragonmux.network>
- * All rights reserved.
+ * Copyright (C) 2022 1BitSquared <info@1bitsquared.com>
+ * Written by Rafael Silva <perigoso@riseup.net>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -31,66 +30,69 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <stdarg.h>
-#include "general.h"
-#include "debug.h"
+#ifndef PLATFORMS_HOSTED_WCHLINK_H
+#define PLATFORMS_HOSTED_WCHLINK_H
 
-uint16_t bmda_debug_flags = 0xffffU; //BMD_DEBUG_ERROR | BMD_DEBUG_WARNING;
+#include <stdbool.h>
+#include "bmp_hosted.h"
 
-static void debug_print(const uint16_t level, const char *format, va_list args)
+#if HOSTED_BMP_ONLY == 1
+bool wchlink_init(bmp_info_s *info)
 {
-	/* Check if the required level is enabled */
-	if (!(bmda_debug_flags & level))
-		return;
-	/* Check to see which of stderr and stdout the message should go to */
-	FILE *const where = bmda_debug_flags & BMD_DEBUG_USE_STDERR ? stderr : stdout;
-	/* And shoot the message to the correct place */
-	(void)vfprintf(where, format, args);
-	/* Note: we have no useful way to use the output of the above call, so we ignore it. */
+	(void)info;
+	return false;
 }
 
-#define DEBUG_PRINT(level)              \
-	va_list args;                       \
-	va_start(args, format);             \
-	debug_print((level), format, args); \
-	va_end(args)
-
-void debug_error(const char *format, ...)
+const char *wchlink_target_voltage(bmp_info_s *info)
 {
-	DEBUG_PRINT(BMD_DEBUG_ERROR);
+	(void)info;
+	return "ERROR";
 }
 
-void debug_warning(const char *format, ...)
+void wchlink_nrst_set_val(bmp_info_s *info, bool assert)
 {
-	DEBUG_PRINT(BMD_DEBUG_WARNING);
+	(void)info;
+	(void)assert;
 }
 
-void debug_info(const char *format, ...)
+bool wchlink_nrst_get_val(bmp_info_s *info)
 {
-	DEBUG_PRINT(BMD_DEBUG_INFO);
+	(void)info;
+	return true;
 }
 
-void debug_gdb(const char *format, ...)
+uint32_t wchlink_rvswd_scan(bmp_info_s *info)
 {
-	DEBUG_PRINT(BMD_DEBUG_GDB);
+	(void)info;
+	return 0;
 }
 
-void debug_target(const char *format, ...)
+bool wchlink_riscv_dmi_read(bmp_info_s *info, uint32_t address, uint32_t *value)
 {
-	DEBUG_PRINT(BMD_DEBUG_TARGET);
+	(void)info;
+	(void)address;
+	(void)value;
+	return false;
 }
 
-void debug_protocol(const char *format, ...)
+bool wchlink_riscv_dmi_write(bmp_info_s *info, uint32_t address, uint32_t value)
 {
-	DEBUG_PRINT(BMD_DEBUG_PROTO);
+	(void)info;
+	(void)address;
+	(void)value;
+	return false;
 }
 
-void debug_probe(const char *format, ...)
-{
-	DEBUG_PRINT(BMD_DEBUG_PROBE);
-}
+#else
+bool wchlink_init(bmp_info_s *info);
+const char *wchlink_target_voltage(bmp_info_s *info);
+void wchlink_nrst_set_val(bmp_info_s *info, bool assert);
+bool wchlink_nrst_get_val(bmp_info_s *info);
+uint32_t wchlink_rvswd_scan(bmp_info_s *info);
+bool wchlink_riscv_dmi_read(bmp_info_s *info, uint32_t address, uint32_t *value);
+bool wchlink_riscv_dmi_write(bmp_info_s *info, uint32_t address, uint32_t value);
+bool wchlink_riscv_dmi_read(bmp_info_s *info, uint32_t address, uint32_t *value);
+bool wchlink_riscv_dmi_write(bmp_info_s *info, uint32_t address, uint32_t value);
+#endif
 
-void debug_wire(const char *format, ...)
-{
-	DEBUG_PRINT(BMD_DEBUG_WIRE);
-}
+#endif /* PLATFORMS_HOSTED_WCHLINK_H */

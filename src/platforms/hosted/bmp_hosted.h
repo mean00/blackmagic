@@ -54,6 +54,7 @@ typedef struct libusb_config_descriptor libusb_config_descriptor_s;
 typedef struct libusb_interface_descriptor libusb_interface_descriptor_s;
 typedef struct libusb_endpoint_descriptor libusb_endpoint_descriptor_s;
 typedef struct libusb_interface libusb_interface_s;
+
 typedef enum libusb_error libusb_error_e;
 
 typedef struct ftdi_context ftdi_context_s;

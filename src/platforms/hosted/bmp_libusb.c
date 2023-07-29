@@ -97,7 +97,7 @@ bmp_type_t get_type_from_vid_pid(const uint16_t probe_vid, const uint16_t probe_
 void bmp_ident(bmp_info_s *info)
 {
 	DEBUG_INFO("Black Magic Debug App %s\n for Black Magic Probe, ST-Link v2 and v3, CMSIS-DAP, "
-			   "J-Link and FTDI (MPSSE)\n",
+			   "J-Link, FTDI (MPSSE) and WCHLink\n",
 		FIRMWARE_VERSION);
 	if (info && info->vid && info->pid) {
 		DEBUG_INFO("Using %04x:%04x %s %s\n %s\n", info->vid, info->pid,
@@ -513,52 +513,216 @@ int find_debuggers(bmda_cli_options_s *cl_opts, bmp_info_s *info)
 		DEBUG_ERROR("Failed to initialise libusb (%d): %s\n", result, libusb_error_name(result));
 		return -1;
 	}
+	bool report = false;
+	size_t found_debuggers;
+	struct libusb_device_descriptor desc;
+	char serial[64];
+	char manufacturer[128];
+	char product[128];
+	bool access_problems = false;
+	char *active_cable = NULL;
+	bool ftdi_unknown = false;
+rescan:
+	found_debuggers = 0;
+	serial[0] = 0;
+	manufacturer[0] = 0;
+	product[0] = 0;
+	access_problems = false;
+	active_cable = NULL;
+	ftdi_unknown = false;
+	for (size_t i = 0; devs[i]; ++i) {
+		libusb_device *dev = devs[i];
+		int res = libusb_get_device_descriptor(dev, &desc);
+		if (res < 0) {
+			DEBUG_ERROR("libusb_get_device_descriptor() failed: %s", libusb_strerror(res));
+			libusb_free_device_list(devs, 1);
+			continue;
+		}
+		/* Exclude hubs from testing. Probably more classes could be excluded here!*/
+		switch (desc.bDeviceClass) {
+		case LIBUSB_CLASS_HUB:
+		case LIBUSB_CLASS_WIRELESS:
+			continue;
+		}
+		libusb_device_handle *handle = NULL;
+		res = libusb_open(dev, &handle);
+		if (res != LIBUSB_SUCCESS) {
+			if (!access_problems) {
+				DEBUG_INFO("Open USB %04x:%04x class %2x failed\n", desc.idVendor, desc.idProduct, desc.bDeviceClass);
+				access_problems = true;
+			}
+			continue;
+		}
+		/* If the device even has a serial number string, fetch it */
+		if (desc.iSerialNumber) {
+			res = libusb_get_string_descriptor_ascii(handle, desc.iSerialNumber, (uint8_t *)serial, sizeof(serial));
+			/* If the call fails and it's not because the device gave us STALL, continue to the next one */
+			if (res < 0 && res != LIBUSB_ERROR_PIPE) {
+				libusb_close(handle);
+				continue;
+			}
+			/* Device has no serial and that's ok. */
+			if (res <= 0)
+				serial[0] = '\0';
+		} else
+			serial[0] = '\0';
+		if (cl_opts->opt_serial && !strstr(serial, cl_opts->opt_serial)) {
+			libusb_close(handle);
+			continue;
+		}
+		/* Attempt to get the manufacturer string */
+		if (desc.iManufacturer) {
+			res = libusb_get_string_descriptor_ascii(
+				handle, desc.iManufacturer, (uint8_t *)manufacturer, sizeof(manufacturer));
+			/* If the call fails and it's not because the device gave us STALL, continue to the next one */
+			if (res < 0 && res != LIBUSB_ERROR_PIPE) {
+				DEBUG_ERROR("libusb_get_string_descriptor_ascii() call to fetch manufacturer string failed: %s\n",
+					libusb_strerror(res));
+				libusb_close(handle);
+				continue;
+			}
+			/* Device has no manufacturer string and that's ok. */
+			if (res <= 0)
+				manufacturer[0] = '\0';
+		} else
+			manufacturer[0] = '\0';
+		/* Attempt to get the product string */
+		if (desc.iProduct) {
+			res = libusb_get_string_descriptor_ascii(handle, desc.iProduct, (uint8_t *)product, sizeof(product));
+			/* If the call fails and it's not because the device gave us STALL, continue to the next one */
+			if (res < 0 && res != LIBUSB_ERROR_PIPE) {
+				DEBUG_ERROR("libusb_get_string_descriptor_ascii() call to fetch product string failed: %s\n",
+					libusb_strerror(res));
+				libusb_close(handle);
+				continue;
+			}
+			/* Device has no product string and that's ok. */
+			if (res <= 0)
+				product[0] = '\0';
+		} else
+			product[0] = '\0';
+		libusb_close(handle);
+		if (cl_opts->opt_ident_string) {
+			char *match_manu = NULL;
+			char *match_product = NULL;
+			match_manu = strstr(manufacturer, cl_opts->opt_ident_string);
+			match_product = strstr(product, cl_opts->opt_ident_string);
+			if (!match_manu && !match_product)
+				continue;
+		}
+		/* Either serial and/or ident_string match or are not given.
+		 * Check type.*/
+		bmp_type_t type = BMP_TYPE_NONE;
+		if (desc.idVendor == VENDOR_ID_BMP) {
+			if (desc.idProduct == PRODUCT_ID_BMP)
+				type = BMP_TYPE_BMP;
+			else {
+				if (desc.idProduct == PRODUCT_ID_BMP_BL)
+					DEBUG_WARN("BMP in bootloader mode found. Restart or reflash!\n");
+				continue;
+			}
+		} else if (find_cmsis_dap_interface(dev, info) == BMP_TYPE_CMSIS_DAP || strstr(manufacturer, "CMSIS") ||
+			strstr(product, "CMSIS"))
+			type = BMP_TYPE_CMSIS_DAP;
+		else if (desc.idVendor == VENDOR_ID_STLINK) {
+			switch (desc.idProduct) {
+			case PRODUCT_ID_STLINKV2:
+			case PRODUCT_ID_STLINKV21:
+			case PRODUCT_ID_STLINKV21_MSD:
+			case PRODUCT_ID_STLINKV3_NO_MSD:
+			case PRODUCT_ID_STLINKV3_BL:
+			case PRODUCT_ID_STLINKV3:
+			case PRODUCT_ID_STLINKV3E:
+				type = BMP_TYPE_STLINK_V2;
+				break;
+			case PRODUCT_ID_STLINKV1:
+				DEBUG_WARN("STLINKV1 not supported\n");
+			default:
+				continue;
+			}
+		} else if (desc.idVendor == VENDOR_ID_SEGGER)
+			type = BMP_TYPE_JLINK;
+		else if (desc.idVendor == VENDOR_ID_WCH)
+			type = BMP_TYPE_WCHLINK;
+		else {
+			const cable_desc_s *cable = cable_desc;
+			for (; cable->name; ++cable) {
+				bool found = false;
+				if (cable->vendor != desc.idVendor || cable->product != desc.idProduct)
+					continue; /* VID/PID do not match*/
+				if (cl_opts->opt_cable) {
+					if (strncmp(cable->name, cl_opts->opt_cable, strlen(cable->name)) != 0)
+						continue; /* cable names do not match*/
+					found = true;
+				}
+				if (cable->description) {
+					if (strncmp(cable->description, product, strlen(cable->description)) != 0)
+						continue; /* descriptions do not match*/
+					found = true;
+				} else {                                 /* VID/PID fits, but no cl_opts->opt_cable and no description*/
+					if (cable->vendor == 0x0403 &&       /* FTDI*/
+						(cable->product == 0x6010 ||     /* FT2232C/D/H*/
+							cable->product == 0x6011 ||  /* FT4232H Quad HS USB-UART/FIFO IC */
+							cable->product == 0x6014)) { /* FT232H Single HS USB-UART/FIFO IC */
+						ftdi_unknown = true;
+						continue; /* Cable name is needed */
+					}
+				}
+				if (found) {
+					active_cable = cable->name;
+					type = BMP_TYPE_FTDI;
+					break;
+				}
+			}
+			if (!cable->name)
+				continue;
+		}
+		/*-x-*/
+		/* Scan for all possible probes on the system */
+		const probe_info_s *probe_list = scan_for_devices(info);
+		if (!probe_list) {
+			DEBUG_WARN("No probes found\n");
+			return -1;
+		}
+		/* Count up how many were found and filter the list for a match to the program options request */
+		const size_t probes = probe_info_count(probe_list);
+		const probe_info_s *probe = NULL;
+		/* If there's just one probe and we didn't get match critera, pick it */
+		if (probes == 1 && !cl_opts->opt_serial && !cl_opts->opt_position)
+			probe = probe_list;
+		else /* Otherwise filter the list */
+			probe = probe_info_filter(probe_list, cl_opts->opt_serial, cl_opts->opt_position);
 
-	/* Scan for all possible probes on the system */
-	const probe_info_s *probe_list = scan_for_devices(info);
-	if (!probe_list) {
-		DEBUG_WARN("No probes found\n");
-		return -1;
-	}
-	/* Count up how many were found and filter the list for a match to the program options request */
-	const size_t probes = probe_info_count(probe_list);
-	const probe_info_s *probe = NULL;
-	/* If there's just one probe and we didn't get match critera, pick it */
-	if (probes == 1 && !cl_opts->opt_serial && !cl_opts->opt_position)
-		probe = probe_list;
-	else /* Otherwise filter the list */
-		probe = probe_info_filter(probe_list, cl_opts->opt_serial, cl_opts->opt_position);
+		/* If we found no matching probes, or we're in list-only mode */
+		if (!probe || cl_opts->opt_list_only) {
+			DEBUG_WARN("Available Probes:\n");
+			probe = probe_list;
+			DEBUG_WARN("     %-20s %-25s %-25s %s\n", "Name", "Serial #", "Manufacturer", "Version");
+			for (size_t position = 1; probe; probe = probe->next, ++position)
+				DEBUG_WARN(" %2zu. %-20s %-25s %-25s %s\n", position, probe->product, probe->serial,
+					probe->manufacturer, probe->version);
+			probe_info_list_free(probe_list);
+			return cl_opts->opt_list_only ? 0 : 1; // false;
+		}
 
-	/* If we found no matching probes, or we're in list-only mode */
-	if (!probe || cl_opts->opt_list_only) {
-		DEBUG_WARN("Available Probes:\n");
-		probe = probe_list;
-		DEBUG_WARN("     %-20s %-25s %-25s %s\n", "Name", "Serial #", "Manufacturer", "Version");
-		for (size_t position = 1; probe; probe = probe->next, ++position)
-			DEBUG_WARN(" %2zu. %-20s %-25s %-25s %s\n", position, probe->product, probe->serial, probe->manufacturer,
-				probe->version);
+		/* We found a matching probe, populate bmp_info_s and signal success */
+		probe_info_to_bmp_info(probe, info);
+		/* If the selected probe is an FTDI adapter try to resolve the adaptor type */
+		if (probe->type == BMP_TYPE_FTDI && !ftdi_lookup_adaptor_descriptor(cl_opts, probe)) {
+			// Don't know the cable type, ask user to specify with "-c"
+			DEBUG_WARN("Multiple FTDI adapters match Vendor and Product ID.\n");
+			DEBUG_WARN("Please specify adapter type on command line using \"-c\" option.\n");
+			return -1; //false
+		}
+		/* If the selected probe is CMSIS-DAP, check for v2 interfaces */
+		if (probe->type == BMP_TYPE_CMSIS_DAP)
+			check_cmsis_interface_type(probe->device, info);
+
 		probe_info_list_free(probe_list);
-		return cl_opts->opt_list_only ? 0 : 1; // false;
+		return 0; // true;
 	}
 
-	/* We found a matching probe, populate bmp_info_s and signal success */
-	probe_info_to_bmp_info(probe, info);
-	/* If the selected probe is an FTDI adapter try to resolve the adaptor type */
-	if (probe->type == BMP_TYPE_FTDI && !ftdi_lookup_adaptor_descriptor(cl_opts, probe)) {
-		// Don't know the cable type, ask user to specify with "-c"
-		DEBUG_WARN("Multiple FTDI adapters match Vendor and Product ID.\n");
-		DEBUG_WARN("Please specify adapter type on command line using \"-c\" option.\n");
-		return -1; //false
-	}
-	/* If the selected probe is CMSIS-DAP, check for v2 interfaces */
-	if (probe->type == BMP_TYPE_CMSIS_DAP)
-		check_cmsis_interface_type(probe->device, info);
-
-	probe_info_list_free(probe_list);
-	return 0; // true;
-}
-
-/*
+	/*
  * Transfer data back and forth with the debug adaptor.
  *
  * If tx_len is non-zero, then send the data in tx_buffer to the adaptor.
@@ -569,55 +733,55 @@ int find_debuggers(bmda_cli_options_s *cl_opts, bmp_info_s *info)
  *   sent/received may be less (per libusb's documentation). If used, rx_buffer must be
  *   suitably intialised up front to avoid UB reads when accessed.
  */
-int bmda_usb_transfer(usb_link_s *link, const void *tx_buffer, size_t tx_len, void *rx_buffer, size_t rx_len)
-{
-	/* If there's data to send */
-	if (tx_len) {
-		uint8_t *tx_data = (uint8_t *)tx_buffer;
-		/* Display the request */
-		DEBUG_WIRE(" request:");
-		for (size_t i = 0; i < tx_len && i < 32U; ++i)
-			DEBUG_WIRE(" %02x", tx_data[i]);
-		if (tx_len > 32U)
-			DEBUG_WIRE(" ...");
-		DEBUG_WIRE("\n");
+	int bmda_usb_transfer(usb_link_s * link, const void *tx_buffer, size_t tx_len, void *rx_buffer, size_t rx_len)
+	{
+		/* If there's data to send */
+		if (tx_len) {
+			uint8_t *tx_data = (uint8_t *)tx_buffer;
+			/* Display the request */
+			DEBUG_WIRE(" request:");
+			for (size_t i = 0; i < tx_len && i < 32U; ++i)
+				DEBUG_WIRE(" %02x", tx_data[i]);
+			if (tx_len > 32U)
+				DEBUG_WIRE(" ...");
+			DEBUG_WIRE("\n");
 
-		/* Perform the transfer */
-		const int result =
-			libusb_bulk_transfer(link->device_handle, link->ep_tx | LIBUSB_ENDPOINT_OUT, tx_data, (int)tx_len, NULL, 0);
-		/* Then decode the result value - if its anything other than LIBUSB_SUCCESS, something went horribly wrong */
-		if (result != LIBUSB_SUCCESS) {
-			DEBUG_ERROR(
-				"%s: Sending request to adaptor failed (%d): %s\n", __func__, result, libusb_error_name(result));
-			if (result == LIBUSB_ERROR_PIPE)
-				libusb_clear_halt(link->device_handle, link->ep_tx | LIBUSB_ENDPOINT_OUT);
-			return result;
+			/* Perform the transfer */
+			const int result = libusb_bulk_transfer(
+				link->device_handle, link->ep_tx | LIBUSB_ENDPOINT_OUT, tx_data, (int)tx_len, NULL, 0);
+			/* Then decode the result value - if its anything other than LIBUSB_SUCCESS, something went horribly wrong */
+			if (result != LIBUSB_SUCCESS) {
+				DEBUG_ERROR(
+					"%s: Sending request to adaptor failed (%d): %s\n", __func__, result, libusb_error_name(result));
+				if (result == LIBUSB_ERROR_PIPE)
+					libusb_clear_halt(link->device_handle, link->ep_tx | LIBUSB_ENDPOINT_OUT);
+				return result;
+			}
 		}
-	}
-	/* If there's data to receive */
-	if (rx_len) {
-		uint8_t *rx_data = (uint8_t *)rx_buffer;
-		int rx_bytes = 0;
-		/* Perform the transfer */
-		const int result = libusb_bulk_transfer(
-			link->device_handle, link->ep_rx | LIBUSB_ENDPOINT_IN, rx_data, (int)rx_len, &rx_bytes, 0);
-		/* Then decode the result value - if its anything other than LIBUSB_SUCCESS, something went horribly wrong */
-		if (result != LIBUSB_SUCCESS) {
-			DEBUG_ERROR(
-				"%s: Receiving response from adaptor failed (%d): %s\n", __func__, result, libusb_error_name(result));
-			if (result == LIBUSB_ERROR_PIPE)
-				libusb_clear_halt(link->device_handle, link->ep_rx | LIBUSB_ENDPOINT_IN);
-			return result;
-		}
+		/* If there's data to receive */
+		if (rx_len) {
+			uint8_t *rx_data = (uint8_t *)rx_buffer;
+			int rx_bytes = 0;
+			/* Perform the transfer */
+			const int result = libusb_bulk_transfer(
+				link->device_handle, link->ep_rx | LIBUSB_ENDPOINT_IN, rx_data, (int)rx_len, &rx_bytes, 0);
+			/* Then decode the result value - if its anything other than LIBUSB_SUCCESS, something went horribly wrong */
+			if (result != LIBUSB_SUCCESS) {
+				DEBUG_ERROR("%s: Receiving response from adaptor failed (%d): %s\n", __func__, result,
+					libusb_error_name(result));
+				if (result == LIBUSB_ERROR_PIPE)
+					libusb_clear_halt(link->device_handle, link->ep_rx | LIBUSB_ENDPOINT_IN);
+				return result;
+			}
 
-		/* Display the response */
-		DEBUG_WIRE("response:");
-		for (size_t i = 0; i < (size_t)rx_bytes && i < 32U; ++i)
-			DEBUG_WIRE(" %02x", rx_data[i]);
-		if (rx_bytes > 32)
-			DEBUG_WIRE(" ...");
-		DEBUG_WIRE("\n");
-		return rx_bytes;
+			/* Display the response */
+			DEBUG_WIRE("response:");
+			for (size_t i = 0; i < (size_t)rx_bytes && i < 32U; ++i)
+				DEBUG_WIRE(" %02x", rx_data[i]);
+			if (rx_bytes > 32)
+				DEBUG_WIRE(" ...");
+			DEBUG_WIRE("\n");
+			return rx_bytes;
+		}
+		return LIBUSB_SUCCESS;
 	}
-	return LIBUSB_SUCCESS;
-}

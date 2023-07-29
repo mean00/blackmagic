@@ -52,22 +52,23 @@
  */
 #define ASCII_CODE_FLAG (1U << 15U) /* flag the code as legacy ASCII */
 
-#define JEP106_MANUFACTURER_ARM          0x43bU /* ARM Ltd. */
-#define JEP106_MANUFACTURER_FREESCALE    0x00eU /* Freescale */
-#define JEP106_MANUFACTURER_NXP          0x015U /* NXP */
-#define JEP106_MANUFACTURER_TEXAS        0x017U /* Texas Instruments */
-#define JEP106_MANUFACTURER_ATMEL        0x01fU /* Atmel */
-#define JEP106_MANUFACTURER_STM          0x020U /* STMicroelectronics */
-#define JEP106_MANUFACTURER_CYPRESS      0x034U /* Cypress Semiconductor */
-#define JEP106_MANUFACTURER_INFINEON     0x041U /* Infineon Technologies */
-#define JEP106_MANUFACTURER_NORDIC       0x244U /* Nordic Semiconductor */
-#define JEP106_MANUFACTURER_SPECULAR     0x501U /* LPC845 with code 501. Strange!? Specular Networks */
-#define JEP106_MANUFACTURER_ARM_CHINA    0xa75U /* Arm China */
-#define JEP106_MANUFACTURER_ENERGY_MICRO 0x673U /* Energy Micro */
-#define JEP106_MANUFACTURER_GIGADEVICE   0x751U /* GigaDevice */
-#define JEP106_MANUFACTURER_RASPBERRY    0x913U /* Raspberry Pi */
-#define JEP106_MANUFACTURER_RENESAS      0x423U /* Renesas */
-#define JEP106_MANUFACTURER_XILINX       0x309U /* Xilinx */
+#define JEP106_MANUFACTURER_ARM          0x43bU  /* ARM Ltd. */
+#define JEP106_MANUFACTURER_FREESCALE    0x00eU  /* Freescale */
+#define JEP106_MANUFACTURER_NXP          0x015U  /* NXP */
+#define JEP106_MANUFACTURER_TEXAS        0x017U  /* Texas Instruments */
+#define JEP106_MANUFACTURER_ATMEL        0x01fU  /* Atmel */
+#define JEP106_MANUFACTURER_STM          0x020U  /* STMicroelectronics */
+#define JEP106_MANUFACTURER_CYPRESS      0x034U  /* Cypress Semiconductor */
+#define JEP106_MANUFACTURER_INFINEON     0x041U  /* Infineon Technologies */
+#define JEP106_MANUFACTURER_NORDIC       0x244U  /* Nordic Semiconductor */
+#define JEP106_MANUFACTURER_SPECULAR     0x501U  /* LPC845 with code 501. Strange!? Specular Networks */
+#define JEP106_MANUFACTURER_ARM_CHINA    0xa75U  /* Arm China */
+#define JEP106_MANUFACTURER_ENERGY_MICRO 0x673U  /* Energy Micro */
+#define JEP106_MANUFACTURER_GIGADEVICE   0x751U  /* GigaDevice */
+#define JEP106_MANUFACTURER_RASPBERRY    0x913U  /* Raspberry Pi */
+#define JEP106_MANUFACTURER_RENESAS      0x423U  /* Renesas */
+#define JEP106_MANUFACTURER_XILINX       0x309U  /* Xilinx */
+#define JEP106_MANUFACTURER_WCH          0xaa55U /* WCH */
 /*
  * This JEP code should belong to "Andes Technology Corporation", but is used on RISC-V by GigaDevice,
  * so in the unlikely event we need to support chips by them, here be dragons.
