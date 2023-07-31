@@ -51,26 +51,12 @@
 
 typedef struct exception exception_s;
 
- 
-// For cortex m0,m0+,m3,m4 without fpu we only have thumb2 (10 registers)
-// the compiler will allocate 23 registers which wastes a lof of stack
-#ifdef __arm__
-    #if defined( __thumb2__ ) && defined(__SOFTFP__) && (__ARM_ARCH==7 || __ARM_ARCH ==6)
-      typedef  int BM_JMP[12] ; // it is 10 actually
-    #else
-      #define BM_JMP jmp_buf
-    #endif
-#else
-  #define BM_JMP jmp_buf
-#endif
-
-
 struct exception {
 	uint32_t type;
 	const char *msg;
 	/* private */
 	uint32_t mask;
-	BM_JMP jmpbuf;
+	jmp_buf jmpbuf;
 	exception_s *outer;
 };
 
@@ -80,7 +66,7 @@ extern exception_s *innermost_exception;
 	(e).type = 0;                                 \
 	(e).mask = (type_mask);                       \
 	(e).outer = innermost_exception;              \
-	innermost_exception = (struct exception *)&(e);           \
+	innermost_exception = (void *)&(e);           \
 	if (setjmp(innermost_exception->jmpbuf) == 0) \
 		for (; innermost_exception == &(e); innermost_exception = (e).outer)
 

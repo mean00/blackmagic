@@ -54,8 +54,8 @@ static bool cmd_version(target_s *t, int argc, const char **argv);
 static bool cmd_help(target_s *t, int argc, const char **argv);
 
 static bool cmd_jtag_scan(target_s *target, int argc, const char **argv);
-/*static*/ bool cmd_swdp_scan(target_s *t, int argc, const char **argv);
-/*static*/ bool cmd_rvswdp_scan(target_s *t, int argc, const char **argv);
+static bool cmd_swdp_scan(target_s *t, int argc, const char **argv);
+static bool cmd_rvswp_scan(target_s *t, int argc, const char **argv);
 static bool cmd_auto_scan(target_s *t, int argc, const char **argv);
 static bool cmd_frequency(target_s *t, int argc, const char **argv);
 static bool cmd_targets(target_s *t, int argc, const char **argv);
@@ -86,7 +86,7 @@ const command_s cmd_list[] = {
 	{"help", cmd_help, "Display help for monitor commands"},
 	{"jtag_scan", cmd_jtag_scan, "Scan JTAG chain for devices"},
 	{"swdp_scan", cmd_swdp_scan, "Scan SW-DP for devices: [TARGET_ID]"},
-	{"rvswdp_scan", cmd_rvswdp_scan, "Scan RVSWD for devices"},
+	{"rvswp_scan", cmd_rvswp_scan, "Scan RVSWD for devices"},
 	{"auto_scan", cmd_auto_scan, "Automatically scan all chain types for devices"},
 	{"frequency", cmd_frequency, "set minimum high and low times: [FREQ]"},
 	{"targets", cmd_targets, "Display list of available targets"},
@@ -287,7 +287,7 @@ bool cmd_swdp_scan(target_s *t, int argc, const char **argv)
 	return true;
 }
 
-bool cmd_rvswdp_scan(target_s *t, int argc, const char **argv)
+bool cmd_rvswp_scan(target_s *t, int argc, const char **argv)
 {
 	(void)t;
 	(void)argc;
