@@ -30,6 +30,9 @@ target_s *target_list = NULL;
 #define STDOUT_READ_BUF_SIZE       64U
 #define FLASH_WRITE_BUFFER_CEILING 1024U
 
+#define snprintf snprintf_
+int snprintf_(char *buffer, size_t count, const char *format, ...);
+
 static bool target_cmd_mass_erase(target_s *target, int argc, const char **argv);
 static bool target_cmd_range_erase(target_s *target, int argc, const char **argv);
 
@@ -570,7 +573,7 @@ void tc_printf(target_s *t, const char *fmt, ...)
 
 	va_start(ap, fmt);
 	t->tc->printf(t->tc, fmt, ap);
-	fflush(stdout);
+	//fflush(stdout);
 	va_end(ap);
 }
 
