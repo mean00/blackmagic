@@ -72,88 +72,83 @@ typedef struct {
 #define CH32VX_CHIPID_FAMILY_OFFSET 20U
 #define CH32VX_CHIPID_FAMILY_MASK   (0xfffU << CH32VX_CHIPID_FAMILY_OFFSET)
 
-#if 0
-#define READ__REG(target, reg) target_mem_read32(target, CH32V3XX__CONTROLLER_ADDRESS + offsetof(ch32__s, reg))
-#define WRITE__REG(target, reg, value) \
-	target_mem_write32(target, CH32V3XX__CONTROLLER_ADDRESS + offsetof(ch32__s, reg), value)
-#else
 #define READ__REG(target, reg) (*(volatile uint32_t *)(CH32V3XX__CONTROLLER_ADDRESS + offsetof(ch32__s, reg)))
 #define WRITE__REG(target, reg, value)                                                           \
 	{                                                                                            \
 		(*(volatile uint32_t *)(CH32V3XX__CONTROLLER_ADDRESS + offsetof(ch32__s, reg))) = value; \
 	}
 
-#endif
 
 #define target 999
 #define INLINE inline __attribute__((always_inline))
 
+//if (!(ctl & CH32V3XX_FMC_CTL_LK))  
+//		return true; 
 /*
 */
-static INLINE bool ch32v3x_fast_unlock()
-{
-	uint32_t ctl = READ__REG(target, CTLR);
-	if (!(ctl & CH32V3XX_FMC_CTL_LK)) // already unlocked
-		return true;
-	// send unlock sequence
-	WRITE__REG(target, KEYR, CH32V3XX_KEY1);
-	WRITE__REG(target, KEYR, CH32V3XX_KEY2);
+#define  ch32v3x_fast_unlock() \
+{ \
+	uint32_t ctl = READ__REG(target, CTLR); \
+	\
+	WRITE__REG(target, KEYR, CH32V3XX_KEY1);\
+	WRITE__REG(target, KEYR, CH32V3XX_KEY2); \
+	\
+	\
+	WRITE__REG(target, MODEKEYR, CH32V3XX_KEY1); \
+	WRITE__REG(target, MODEKEYR, CH32V3XX_KEY2); \
+	\
+	uint32_t v = READ__REG(target, CTLR); \
+}
+	//return !(v & CH32V3XX_FMC_CTL_CH32_FASTUNLOCK); \
 
-	// send fast unlock sequence
-	WRITE__REG(target, MODEKEYR, CH32V3XX_KEY1);
-	WRITE__REG(target, MODEKEYR, CH32V3XX_KEY2);
 
-	uint32_t v = READ__REG(target, CTLR);
-	return !(v & CH32V3XX_FMC_CTL_CH32_FASTUNLOCK);
+#define ch32v3x_wait_not_busy() \
+{ \
+	\
+	while (1) { \
+		uint32_t s = READ__REG(t, STATR); \
+		if (!(s & CH32V3XX_FMC_STAT_BUSY)) \
+			break; \
+	} \
 }
 
-static void ch32v3x_wait_not_busy()
-{
-	// is it busy  ?
-	while (1) {
-		uint32_t s = READ__REG(->t, STATR);
-		if (!(s & CH32V3XX_FMC_STAT_BUSY))
-			return;
-	}
-}
-
-static INLINE void ch32v3x_wait_not_wr_busy()
-{
-	// is it wrbusy  ?
-	while (1) {
-		uint32_t s = READ__REG(->t, STATR);
-		if (!(s & CH32V3XX_FMC_STAT_WR_BUSY))
-			return;
-	}
-}
-
-/*
-*/
-static INLINE void ch32v3x_ctl_set(uint32_t bits)
-{
-	uint32_t v = READ__REG(->t, CTLR);
-	v |= bits;
-	WRITE__REG(->t, CTLR, v);
+#define   ch32v3x_wait_not_wr_busy() \
+{ \
+	\
+	while (1) { \
+		uint32_t s = READ__REG(t, STATR); \
+		if (!(s & CH32V3XX_FMC_STAT_WR_BUSY)) \
+			return; \
+	} \
 }
 
 /*
 */
-static INLINE void ch32v3x_ctl_clear(uint32_t bits)
-{
-	uint32_t v = READ__REG(->t, CTLR);
-	v &= ~bits;
-	WRITE__REG(->t, CTLR, v);
+#define   ch32v3x_ctl_set(  bits) \
+{ \
+	uint32_t v = READ__REG(t, CTLR); \
+	v |= bits; \
+	WRITE__REG(->t, CTLR, v); \
+}
+
+/*
+*/
+#define   ch32v3x_ctl_clear(  bits) \
+{ \
+	uint32_t v = READ__REG(t, CTLR); \
+	v &= ~bits; \
+	WRITE__REG(->t, CTLR, v); \
 }
 
 /**
 */
-static INLINE void ch32v3x_stat_set(uint32_t bits)
-{
-	uint32_t v = READ__REG(->t, STATR);
-	v |= bits;
-	WRITE__REG(0, STATR, v);
+#define   ch32v3x_stat_set(  bits) \
+{ \
+	uint32_t v = READ__REG(t, STATR); \
+	v |= bits; \
+	WRITE__REG(0, STATR, v); \
 }
-
+typedef void (*rv32_end)(void);
 /*
 */
 bool ch32v3x__erase(uint32_t addr, size_t len)
@@ -164,7 +159,7 @@ bool ch32v3x__erase(uint32_t addr, size_t len)
 	ch32v3x_fast_unlock();
 
 	uint32_t cur_addr = addr;
-	cur_addr |= 0x08000000; // some leftover from older chip it seems
+	cur_addr |= 0x08000000; // make absolutely sure that bit is set
 	uint32_t end_addr = cur_addr + len;
 	while (cur_addr < end_addr) {
 		ch32v3x_ctl_set(CH32V3XX_FMC_CTL_CH32_FASTERASE);
@@ -174,7 +169,8 @@ bool ch32v3x__erase(uint32_t addr, size_t len)
 		ch32v3x_ctl_clear(CH32V3XX_FMC_CTL_CH32_FASTERASE);
 		cur_addr += 256;
 	}
-	__asm__("EBREAK");
+	rv32_end end=(rv32_end )0x20000000;
+	end();
 	return true;
 }
 
