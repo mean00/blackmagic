@@ -8,8 +8,7 @@ bool ch32v3x_erase(uint32_t addr, size_t len)
 	(void)addr;
 	(void)len;	
 
-	uint32_t cur_addr = addr;
-	cur_addr |= 0x08000000; // make absolutely sure that bit is set
+	uint32_t cur_addr = addr;	
 	uint32_t end_addr = cur_addr + len;
 	while (cur_addr < end_addr) {
 		ch32v3x_ctl_set(CH32V3XX_FMC_CTL_CH32_FASTERASE);

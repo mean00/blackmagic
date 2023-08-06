@@ -6,10 +6,7 @@ bool ch32v3x_write(uint32_t  dest, uint32_t adr_source, size_t len)
 {
 	uint32_t ret=0;
 	uint32_t cur_addr = dest;
-	const uint8_t *src = (const uint8_t *)adr_source;
-	// Warning : it is assumed address is 8 bytes aligned TODO TODO
-	cur_addr |= 0x08000000; // some leftover from older chip it seems
-	
+	const uint8_t *src = (const uint8_t *)adr_source;	
 	uint32_t end_addr = cur_addr + len;
 	while (cur_addr < end_addr) {
 		ch32v3x_ctl_set( CH32V3XX_FMC_CTL_CH32_FASTPROGRAM);

@@ -308,7 +308,9 @@ static bool ch32v3x_fast_lock(target_flash_s *flash)
 #define CHREG_PC 32
 #define CHREG_SP 2
 /**
-
+	\brief Execute code on the target to speed up flash operation
+	at the end of the execution, the code jumps back to the beginning of the RAM where
+	we put a breakpoint in _prepare.
 */
 bool exec_code(target_s *t, uint32_t codeexec, uint32_t param1, uint32_t param2, uint32_t param3)
 {
@@ -322,10 +324,7 @@ bool exec_code(target_s *t, uint32_t codeexec, uint32_t param1, uint32_t param2,
 	t->reg_write(t, CHREG_A2, &param3, 4);
 	t->reg_write(t, CHREG_SP, &sp, 4);
 	t->reg_write(t, CHREG_PC, &pc, 4);
-
-
-
-	// But breakpoint on ebreak
+	
 	target_halt_reason_e reason = TARGET_HALT_RUNNING;
 	t->halt_resume(t, false); // go!
 	platform_timeout_s timeout;
@@ -358,8 +357,6 @@ the_end:
 
 static bool ch32v3x_flash_erase_flashstub(target_flash_s *flash, target_addr_t addr, size_t len)
 {	
-	addr |= FLASH_OFFSET; // just in case
-	
 	while (len ) {
 		uint32_t chunk = len;
 		if (chunk > 1024)
@@ -381,8 +378,7 @@ static bool ch32v3x_flash_erase_direct(target_flash_s *flash, target_addr_t addr
 	(void)len;
 	
 
-	uint32_t cur_addr = addr;
-	cur_addr |= FLASH_OFFSET; // some leftover from older chip it seems
+	uint32_t cur_addr = addr;	
 	uint32_t end_addr = cur_addr + len;
 	while (cur_addr < end_addr) {
 		ch32v3x_ctl_set(flash, CH32V3XX_FMC_CTL_CH32_FASTERASE);
@@ -404,8 +400,7 @@ static bool ch32v3x_flash_erase_direct(target_flash_s *flash, target_addr_t addr
 		}
 #endif
 		cur_addr += 256;
-	}
-	//ch32v3x_fast_lock(flash);
+	}	
 	return true;
 }
 
@@ -500,6 +495,7 @@ static bool ch32v3x_flash_write_flashstub(target_flash_s *flash, target_addr_t d
 */
 static bool ch32v3x_flash_write(target_flash_s *flash, target_addr_t dest, const void *srcx, size_t len)
 {	
+	dest |= FLASH_OFFSET;
 	return ch32v3x_flash_write_flashstub(flash, dest,srcx,len);
 }
 //
@@ -508,6 +504,7 @@ static bool ch32v3x_flash_write(target_flash_s *flash, target_addr_t dest, const
 */
 static bool ch32v3x_flash_erase(target_flash_s *flash, target_addr_t addr, size_t len)
 {	
+	addr |= FLASH_OFFSET;
 	return ch32v3x_flash_erase_flashstub(flash, addr, len);
 }
 
