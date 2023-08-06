@@ -6,8 +6,7 @@ bool ch32v3x_erase(uint32_t addr, size_t len)
 {
 	//(void);
 	(void)addr;
-	(void)len;
-	ch32v3x_fast_unlock();
+	(void)len;	
 
 	uint32_t cur_addr = addr;
 	cur_addr |= 0x08000000; // make absolutely sure that bit is set

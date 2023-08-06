@@ -29,10 +29,10 @@
 #include "exception.h"
 #include "riscv_debug.h"
 // tmp
-#include "unistd.h"
-#undef printf
+#define debug DEBUG_ERROR
 
-#define RAM_ADDRESS 0x20000000
+#define RAM_ADDRESS  0x20000000
+#define FLASH_OFFSET 0x08000000
 
 #define STUB_CODE_LOCATION     (RAM_ADDRESS + 4 * 1024)
 #define STUB_STACK_LOCATION    (RAM_ADDRESS + 2 * 1024)
@@ -93,8 +93,10 @@ typedef struct {
 #define WRITE_FLASH_REG(target, reg, value) \
 	target_mem_write32(target, CH32V3XX_FLASH_CONTROLLER_ADDRESS + offsetof(ch32_flash_s, reg), value)
 
+ bool ch32v3x_test(target_s *target, int argc, const char **argv);
+
 const command_s ch32v3x_cmd_list[] = {
-	{NULL, NULL, NULL},
+	{"chtest", ch32v3x_test, "ch32v3x test"},
 };
 
 static bool ch32v3x_flash_erase(target_flash_s *flash, target_addr_t addr, size_t len);
@@ -127,8 +129,8 @@ bool ch32v3xx_probe(target_s *target)
 {
 	int flash_size = 0;
 	int ram_size = 0;
-	size_t erase_size = 1024;
-	size_t write_size = 1024;
+	size_t erase_size = 256;
+	size_t write_size = 256;
 	/* CHIPID table
  *	CH32V303CBT6: 0x303305x4
  *	CH32V303RBT6: 0x303205x4
@@ -295,8 +297,8 @@ static bool ch32v3x_fast_lock(target_flash_s *flash)
 #endif
 
 #define CHREG_A0 10
-#define CHREG_A1 12
-#define CHREG_A2 13
+#define CHREG_A1 11
+#define CHREG_A2 12
 #define CHREG_PC 32
 #define CHREG_SP 2
 /**
@@ -308,7 +310,7 @@ bool exec_code(target_s *t, uint32_t param1, uint32_t param2, uint32_t param3)
 	uint32_t pc = STUB_CODE_LOCATION;
 
 	uint32_t zero=0;
-	riscv_csr_write(t->priv, 0x304, &zero); // disable all interrupts
+	riscv_csr_write(t->priv, 0x304, &zero); // disable all interrupts set MIE to zero
 	target_breakwatch_set(t, TARGET_BREAK_HARD, RAM_ADDRESS , 4);
 
 	t->reg_write(t, CHREG_A0, &param1, 4);
@@ -324,32 +326,34 @@ bool exec_code(target_s *t, uint32_t param1, uint32_t param2, uint32_t param3)
 	platform_timeout_set(&timeout, 5000);
 	while (reason == TARGET_HALT_RUNNING) {
 		if (platform_timeout_is_expired(&timeout)) {
-			printf("Timeout executing code !\n");
+			debug("Timeout executing code !\n");
 			t->halt_request(t);
-			return false;
+			return true;
 		}
 		reason = t->halt_poll(t, NULL);
 	}
 
 	if (reason == TARGET_HALT_ERROR)
 	{
-		printf("Error executing code !\n");
+		debug("Error executing code !\n");
+		t->halt_request(t);
 		raise_exception(EXCEPTION_ERROR, "Target lost in stub");
 	}
 
 	if (reason != TARGET_HALT_BREAKPOINT) {
-		printf("OOPS executing code !\n");
+		debug("OOPS executing code !\n");
+		t->halt_request(t);
 		DEBUG_WARN(" Reason %d\n", reason);
 		return false;
 	}
-	printf("Okokok executing code !\n");
+	//printf("Okokok executing code !\n");
+	t->halt_request(t);
 	return true;
 }
 
 static bool ch32v3x_flash_erase_flashstub(target_flash_s *flash, target_addr_t addr, size_t len)
-{
-	// set mie to zero to block all interrupts
-	addr |= 0x08000000; // just in case
+{	
+	addr |= FLASH_OFFSET; // just in case
 	target_mem_write(flash->t, STUB_CODE_LOCATION, ch32v3x_erase_bin, sizeof(ch32v3x_erase_bin));
 
 	while (len ) {
@@ -371,10 +375,10 @@ static bool ch32v3x_flash_erase_direct(target_flash_s *flash, target_addr_t addr
 	//(void)flash;
 	(void)addr;
 	(void)len;
-	ch32v3x_fast_unlock(flash->t);
+	
 
 	uint32_t cur_addr = addr;
-	cur_addr |= 0x08000000; // some leftover from older chip it seems
+	cur_addr |= FLASH_OFFSET; // some leftover from older chip it seems
 	uint32_t end_addr = cur_addr + len;
 	while (cur_addr < end_addr) {
 		ch32v3x_ctl_set(flash, CH32V3XX_FMC_CTL_CH32_FASTERASE);
@@ -406,11 +410,7 @@ static bool ch32v3x_flash_erase_direct(target_flash_s *flash, target_addr_t addr
 static bool ch32v3x_flash_write_direct(target_flash_s *flash, target_addr_t dest, const void *srcx, size_t len)
 {
 	uint32_t cur_addr = dest;
-	const uint8_t *src = (const uint8_t *)srcx;
-	// Warning : it is assumed address is 8 bytes aligned TODO TODO
-	cur_addr |= 0x08000000; // some leftover from older chip it seems
-
-	//return false;
+	const uint8_t *src = (const uint8_t *)srcx;	
 
 	uint32_t end_addr = cur_addr + len;
 	while (cur_addr < end_addr) {
@@ -448,12 +448,11 @@ static bool ch32v3x_flash_write_direct(target_flash_s *flash, target_addr_t dest
 */
 static bool ch32v3x_flash_write_flashstub(target_flash_s *flash, target_addr_t dest, const void *srcx, size_t len)
 {
-	uint32_t addr = dest;
-	// set mie to zero to block all interrupts
-	addr |= 0x08000000; // just in case
+	uint32_t addr = dest;	
+
 	target_mem_write(flash->t, STUB_CODE_LOCATION, ch32v3x_write_bin, sizeof(ch32v3x_write_bin));
 
-	while (len > 1024) {
+	while (len) {
 		uint32_t chunk = len;
 		if (chunk > 1024)
 			chunk = 1024;
@@ -471,9 +470,8 @@ static bool ch32v3x_flash_write_flashstub(target_flash_s *flash, target_addr_t d
 */
 static bool ch32v3x_flash_write(target_flash_s *flash, target_addr_t dest, const void *srcx, size_t len)
 {
-	//return true;
-	return ch32v3x_flash_write_direct(flash, dest,srcx,len);
-	//return ch32v3x_flash_write_flashstub(flash, dest,srcx,len);
+	ch32v3x_fast_unlock(flash->t);
+	return ch32v3x_flash_write_flashstub(flash, dest,srcx,len);
 }
 //
 
@@ -481,7 +479,32 @@ static bool ch32v3x_flash_write(target_flash_s *flash, target_addr_t dest, const
 */
 static bool ch32v3x_flash_erase(target_flash_s *flash, target_addr_t addr, size_t len)
 {
-	//if(addr==0) return ch32v3x_flash_erase_direct(flash, addr, len);
+	ch32v3x_fast_unlock(flash->t);
 	return ch32v3x_flash_erase_flashstub(flash, addr, len);
-	//return ch32v3x_flash_erase_direct(flash, addr, len);
+}
+
+bool ch32v3x_test(target_s *t, int argc, const char **argv)
+{
+	uint32_t addr=0;
+	uint32_t len=256;
+	uint32_t zero=0;
+
+	t->halt_request(t);
+
+	addr |= FLASH_OFFSET; // just in case
+	target_mem_write(t, STUB_CODE_LOCATION, ch32v3x_erase_bin, sizeof(ch32v3x_erase_bin));
+	uint32_t sp = STUB_STACKEND_LOCATION;
+	uint32_t pc = STUB_CODE_LOCATION;
+
+	riscv_csr_write(t->priv, 0x304, &zero); // disable all interrupts set MIE to zero
+	target_breakwatch_set(t, TARGET_BREAK_HARD, RAM_ADDRESS , 4);
+
+	t->reg_write(t, CHREG_A0, &addr, 4);
+	t->reg_write(t, CHREG_A1, &len, 4);
+	t->reg_write(t, CHREG_A2, &zero, 4);
+	t->reg_write(t, CHREG_SP, &sp, 4);
+	t->reg_write(t, CHREG_PC, &pc, 4);
+	
+	return true;
+
 }
