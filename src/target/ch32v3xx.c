@@ -306,18 +306,27 @@ static bool ch32v3x_fast_lock(target_flash_s *flash)
 */
 bool exec_code(target_s *t, uint32_t param1, uint32_t param2, uint32_t param3)
 {
+	bool ret=false;
+	uint32_t oldsp,oldpc;
 	uint32_t sp = STUB_STACKEND_LOCATION;
 	uint32_t pc = STUB_CODE_LOCATION;
-
+	uint32_t oldmie=0;
 	uint32_t zero=0;
+	riscv_csr_read(t->priv, 0x304, &oldmie); // disable all interrupts set MIE to zero
 	riscv_csr_write(t->priv, 0x304, &zero); // disable all interrupts set MIE to zero
 	target_breakwatch_set(t, TARGET_BREAK_HARD, RAM_ADDRESS , 4);
+
+	t->reg_read(t, CHREG_SP, &oldsp, 4);
+	t->reg_read(t, CHREG_PC, &oldpc, 4);
+
 
 	t->reg_write(t, CHREG_A0, &param1, 4);
 	t->reg_write(t, CHREG_A1, &param2, 4);
 	t->reg_write(t, CHREG_A2, &param3, 4);
 	t->reg_write(t, CHREG_SP, &sp, 4);
 	t->reg_write(t, CHREG_PC, &pc, 4);
+
+
 
 	// But breakpoint on ebreak
 	target_halt_reason_e reason = TARGET_HALT_RUNNING;
@@ -327,8 +336,7 @@ bool exec_code(target_s *t, uint32_t param1, uint32_t param2, uint32_t param3)
 	while (reason == TARGET_HALT_RUNNING) {
 		if (platform_timeout_is_expired(&timeout)) {
 			debug("Timeout executing code !\n");
-			t->halt_request(t);
-			return true;
+			goto the_end;
 		}
 		reason = t->halt_poll(t, NULL);
 	}
@@ -336,19 +344,23 @@ bool exec_code(target_s *t, uint32_t param1, uint32_t param2, uint32_t param3)
 	if (reason == TARGET_HALT_ERROR)
 	{
 		debug("Error executing code !\n");
-		t->halt_request(t);
-		raise_exception(EXCEPTION_ERROR, "Target lost in stub");
+		goto the_end;
 	}
 
 	if (reason != TARGET_HALT_BREAKPOINT) {
 		debug("OOPS executing code !\n");
-		t->halt_request(t);
-		DEBUG_WARN(" Reason %d\n", reason);
-		return false;
+		goto the_end;
 	}
 	//printf("Okokok executing code !\n");
+	ret = true;
+the_end:
 	t->halt_request(t);
-	return true;
+	target_breakwatch_clear(t, TARGET_BREAK_HARD, RAM_ADDRESS , 4);		
+	t->reg_write(t, CHREG_SP, &oldsp, 4);
+	t->reg_write(t, CHREG_PC, &oldpc, 4);
+	riscv_csr_write(t->priv, 0x304, &oldmie); 
+	if(!ret)	debug("Exec error\n");
+	return ret;
 }
 
 static bool ch32v3x_flash_erase_flashstub(target_flash_s *flash, target_addr_t addr, size_t len)

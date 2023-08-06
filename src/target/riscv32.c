@@ -67,8 +67,10 @@ typedef struct riscv32_regs {
 #define RV32_MATCH_BEFORE 0x00000000U
 #define RV32_MATCH_AFTER  0x00040000U
 
+static ssize_t riscv32_reg_read(target_s *target, int c, void *data, size_t max);
 static void riscv32_regs_read(target_s *target, void *data);
 static void riscv32_regs_write(target_s *target, const void *data);
+static ssize_t riscv32_reg_write(target_s *const target, int c, const void *data, size_t max );
 static void riscv32_mem_read(target_s *target, void *dest, target_addr_t src, size_t len);
 static void riscv32_mem_write(target_s *target, target_addr_t dest, const void *src, size_t len);
 
@@ -91,6 +93,8 @@ bool riscv32_probe(target_s *const target)
 	target->regs_size = sizeof(riscv32_regs_s);
 	target->regs_read = riscv32_regs_read;
 	target->regs_write = riscv32_regs_write;
+	target->reg_write = riscv32_reg_write;
+	target->reg_read = riscv32_reg_read;
 	target->mem_read = riscv32_mem_read;
 	target->mem_write = riscv32_mem_write;
 
@@ -128,7 +132,6 @@ static void riscv32_regs_read(target_s *const target, void *const data)
 	/* Special access to grab the program counter that would be executed on resuming the hart */
 	riscv_csr_read(hart, RV_DPC, &regs->pc);
 }
-
 static void riscv32_regs_write(target_s *const target, const void *const data)
 {
 	/* Grab the hart structure and figure out how many registers need reading out */
@@ -142,6 +145,44 @@ static void riscv32_regs_write(target_s *const target, const void *const data)
 	}
 	/* Special access to poke in the program counter that will be executed on resuming the hart */
 	riscv_csr_write(hart, RV_DPC, &regs->pc);
+}
+
+static ssize_t riscv32_reg_read(target_s *target, int c, void *data, size_t max)
+{
+		
+	riscv_hart_s *const hart = riscv_hart_struct(target);
+    // TODO check size
+    if(c==32)
+    {
+	    riscv_csr_read(hart, RV_DPC, data);
+        return 4;
+    }
+    if(c<32)
+    {
+		riscv_csr_read(hart, RV_GPR_BASE + c, data);
+        return 4;
+    }
+    return -1;
+}
+
+
+
+static ssize_t riscv32_reg_write(target_s *const target, int c, const void *data, size_t max )
+{
+	/* Grab the hart structure and figure out how many registers need reading out */
+	riscv_hart_s *const hart = riscv_hart_struct(target);
+    // TODO check size
+    if(c==32)
+    {
+	    riscv_csr_write(hart, RV_DPC, data);
+        return 4;
+    }
+    if(c<32)
+    {
+		riscv_csr_write(hart, RV_GPR_BASE + c, data);
+        return 4;
+    }
+    return -1;
 }
 
 /* Takes in data from abstract command arg0 and, based on the access width, unpacks it to dest */
