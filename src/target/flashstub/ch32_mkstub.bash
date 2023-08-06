@@ -13,3 +13,4 @@ build_stub()
 
 
 build_stub ch32v3x_erase
+build_stub ch32v3x_write

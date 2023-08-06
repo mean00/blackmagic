@@ -22,7 +22,22 @@
 #include "general.h"
 #include "target.h"
 #include "target_internal.h"
-#include "cortexm.h"
+#include "riscv_debug.h"
+
+#include "flashstub/ch32v3x_erase.stub"
+#include "flashstub/ch32v3x_write.stub"
+#include "exception.h"
+#include "riscv_debug.h"
+// tmp
+#include "unistd.h"
+#undef printf
+
+#define RAM_ADDRESS 0x20000000
+
+#define STUB_CODE_LOCATION     (RAM_ADDRESS + 4 * 1024)
+#define STUB_STACK_LOCATION    (RAM_ADDRESS + 2 * 1024)
+#define STUB_STACKEND_LOCATION (RAM_ADDRESS + 4 * 1024 - 16)
+#define STUB_DATA_LOCATION     (RAM_ADDRESS + 6 * 1024)
 
 #if PC_HOSTED == 1
 #define debug printf
@@ -87,7 +102,7 @@ static bool ch32v3x_flash_write(target_flash_s *flash, target_addr_t dest, const
 
 /*
 */
-static void ch32v3x_add_flash(target_s *target, uint32_t addr, size_t length, size_t erasesize)
+static void ch32v3x_add_flash(target_s *target, uint32_t addr, size_t length, size_t erasesize, size_t writesize)
 {
 	target_flash_s *flash = calloc(1, sizeof(*flash));
 	if (!flash) { /* calloc failed: heap exhaustion */
@@ -100,7 +115,7 @@ static void ch32v3x_add_flash(target_s *target, uint32_t addr, size_t length, si
 	flash->blocksize = erasesize;
 	flash->erase = ch32v3x_flash_erase;
 	flash->write = ch32v3x_flash_write;
-	flash->writesize = erasesize;
+	flash->writesize = writesize;
 	flash->erased = 0xff;
 	target_add_flash(target, flash);
 }
@@ -112,7 +127,8 @@ bool ch32v3xx_probe(target_s *target)
 {
 	int flash_size = 0;
 	int ram_size = 0;
-	size_t block_size = 256;
+	size_t erase_size = 1024;
+	size_t write_size = 1024;
 	/* CHIPID table
  *	CH32V303CBT6: 0x303305x4
  *	CH32V303RBT6: 0x303205x4
@@ -185,8 +201,8 @@ bool ch32v3xx_probe(target_s *target)
 		break;
 	}
 	DEBUG_WARN("CH32V flash %d kB, ram %d kB\n", flash_size, ram_size);
-	target_add_ram(target, 0x20000000, ram_size * 1024U);
-	ch32v3x_add_flash(target, 0x0, (size_t)flash_size * 1024U, block_size);
+	target_add_ram(target, RAM_ADDRESS, ram_size * 1024U);
+	ch32v3x_add_flash(target, 0x0, (size_t)flash_size * 1024U, erase_size, write_size);
 	target_add_commands(target, ch32v3x_cmd_list, target->driver);
 
 	return true;
@@ -277,9 +293,80 @@ static bool ch32v3x_fast_lock(target_flash_s *flash)
 	return true;
 }
 #endif
+
+#define CHREG_A0 10
+#define CHREG_A1 12
+#define CHREG_A2 13
+#define CHREG_PC 32
+#define CHREG_SP 2
+/**
+
+*/
+bool exec_code(target_s *t, uint32_t param1, uint32_t param2, uint32_t param3)
+{
+	uint32_t sp = STUB_STACKEND_LOCATION;
+	uint32_t pc = STUB_CODE_LOCATION;
+
+	uint32_t zero=0;
+	riscv_csr_write(t->priv, 0x304, &zero); // disable all interrupts
+	target_breakwatch_set(t, TARGET_BREAK_HARD, RAM_ADDRESS , 4);
+
+	t->reg_write(t, CHREG_A0, &param1, 4);
+	t->reg_write(t, CHREG_A1, &param2, 4);
+	t->reg_write(t, CHREG_A2, &param3, 4);
+	t->reg_write(t, CHREG_SP, &sp, 4);
+	t->reg_write(t, CHREG_PC, &pc, 4);
+
+	// But breakpoint on ebreak
+	target_halt_reason_e reason = TARGET_HALT_RUNNING;
+	t->halt_resume(t, false); // go!
+	platform_timeout_s timeout;
+	platform_timeout_set(&timeout, 5000);
+	while (reason == TARGET_HALT_RUNNING) {
+		if (platform_timeout_is_expired(&timeout)) {
+			printf("Timeout executing code !\n");
+			t->halt_request(t);
+			return false;
+		}
+		reason = t->halt_poll(t, NULL);
+	}
+
+	if (reason == TARGET_HALT_ERROR)
+	{
+		printf("Error executing code !\n");
+		raise_exception(EXCEPTION_ERROR, "Target lost in stub");
+	}
+
+	if (reason != TARGET_HALT_BREAKPOINT) {
+		printf("OOPS executing code !\n");
+		DEBUG_WARN(" Reason %d\n", reason);
+		return false;
+	}
+	printf("Okokok executing code !\n");
+	return true;
+}
+
+static bool ch32v3x_flash_erase_flashstub(target_flash_s *flash, target_addr_t addr, size_t len)
+{
+	// set mie to zero to block all interrupts
+	addr |= 0x08000000; // just in case
+	target_mem_write(flash->t, STUB_CODE_LOCATION, ch32v3x_erase_bin, sizeof(ch32v3x_erase_bin));
+
+	while (len ) {
+		uint32_t chunk = len;
+		if (chunk > 1024)
+			chunk = 1024;
+		if (!exec_code(flash->t, addr, chunk, 0))
+			return false;
+		addr += chunk;
+		len -= chunk;
+	}
+	return true;
+}
+
 /*
 */
-static bool ch32v3x_flash_erase(target_flash_s *flash, target_addr_t addr, size_t len)
+static bool ch32v3x_flash_erase_direct(target_flash_s *flash, target_addr_t addr, size_t len)
 {
 	//(void)flash;
 	(void)addr;
@@ -287,7 +374,7 @@ static bool ch32v3x_flash_erase(target_flash_s *flash, target_addr_t addr, size_
 	ch32v3x_fast_unlock(flash->t);
 
 	uint32_t cur_addr = addr;
-	cur_addr += 0x08000000; // some leftover from older chip it seems
+	cur_addr |= 0x08000000; // some leftover from older chip it seems
 	uint32_t end_addr = cur_addr + len;
 	while (cur_addr < end_addr) {
 		ch32v3x_ctl_set(flash, CH32V3XX_FMC_CTL_CH32_FASTERASE);
@@ -316,12 +403,14 @@ static bool ch32v3x_flash_erase(target_flash_s *flash, target_addr_t addr, size_
 
 /*
 */
-static bool ch32v3x_flash_write(target_flash_s *flash, target_addr_t dest, const void *srcx, size_t len)
+static bool ch32v3x_flash_write_direct(target_flash_s *flash, target_addr_t dest, const void *srcx, size_t len)
 {
 	uint32_t cur_addr = dest;
 	const uint8_t *src = (const uint8_t *)srcx;
 	// Warning : it is assumed address is 8 bytes aligned TODO TODO
-	cur_addr += 0x08000000; // some leftover from older chip it seems
+	cur_addr |= 0x08000000; // some leftover from older chip it seems
+
+	//return false;
 
 	uint32_t end_addr = cur_addr + len;
 	while (cur_addr < end_addr) {
@@ -355,5 +444,44 @@ static bool ch32v3x_flash_write(target_flash_s *flash, target_addr_t dest, const
 	//
 	return true;
 }
+/**
+*/
+static bool ch32v3x_flash_write_flashstub(target_flash_s *flash, target_addr_t dest, const void *srcx, size_t len)
+{
+	uint32_t addr = dest;
+	// set mie to zero to block all interrupts
+	addr |= 0x08000000; // just in case
+	target_mem_write(flash->t, STUB_CODE_LOCATION, ch32v3x_write_bin, sizeof(ch32v3x_write_bin));
 
+	while (len > 1024) {
+		uint32_t chunk = len;
+		if (chunk > 1024)
+			chunk = 1024;
+		target_mem_write(flash->t, STUB_DATA_LOCATION, srcx, chunk);
+		if (!exec_code(flash->t, addr, STUB_DATA_LOCATION, chunk))
+			return false;
+		addr += chunk;
+		len -= chunk;
+		srcx += chunk;
+	}
+	return true;
+}
+/*
+#define RAM_ADDRESS 0x20000000
+*/
+static bool ch32v3x_flash_write(target_flash_s *flash, target_addr_t dest, const void *srcx, size_t len)
+{
+	//return true;
+	return ch32v3x_flash_write_direct(flash, dest,srcx,len);
+	//return ch32v3x_flash_write_flashstub(flash, dest,srcx,len);
+}
 //
+
+/**
+*/
+static bool ch32v3x_flash_erase(target_flash_s *flash, target_addr_t addr, size_t len)
+{
+	//if(addr==0) return ch32v3x_flash_erase_direct(flash, addr, len);
+	return ch32v3x_flash_erase_flashstub(flash, addr, len);
+	//return ch32v3x_flash_erase_direct(flash, addr, len);
+}
