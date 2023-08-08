@@ -137,6 +137,25 @@ static const char *const riscv_gpr_names[RV_GPRS_COUNT] = {
 	"s8", "s9", "s10", "s11",
 	"t3", "t4", "t5", "t6",
 };
+
+typedef struct riscv_csr_descriptor riscv_csr_descriptor_s;
+
+struct riscv_csr_descriptor  {
+	const char *name;
+	const uint32_t   csr_number; // fits in 16 bytes actually (?)	
+};
+
+
+static const riscv_csr_descriptor_s riscv_csrs[]={
+	{"mstatus",RV_CSR_STATUS},
+	{"mie",	RV_CSR_MIE},
+	{"mtvec",	RV_CSR_MTVEC},
+	{"mepc",	RV_CSR_MEPC},
+	{"mcause",RV_CSR_MCAUSE},
+	{"mtval",	RV_CSR_MTVAL},
+	{"mip",	RV_CSR_MIP},
+};
+
 // clang-format on
 
 /* General-purpose register types */
@@ -957,11 +976,22 @@ static size_t riscv_build_target_description(
 
 	/* XXX: TODO - implement generation of the FPU feature and registers */
 
+	/* Add main CSR registers*/
+	offset += snprintf(buffer + offset, print_size, "</feature>");
+
+	offset += snprintf(buffer + offset, print_size, "<feature name=\"org.gnu.gdb.riscv.csr\">");
+	int nb_csr = sizeof(riscv_csrs) / sizeof(riscv_csr_descriptor_s);
+	for (int i = 0; i < nb_csr; i++) {
+		offset += snprintf(buffer + offset, print_size,
+			" <reg name=\"%s\" bitsize=\"%d\" type=\"int\" regnum=\"%d\" group=\"csr\" save-restore=\"no\"/>",
+			riscv_csrs[i].name, address_width, riscv_csrs[i].csr_number + RV_CSR_GDB_OFFSET);
+	}
+	offset += snprintf(buffer + offset, print_size, "</feature>");
 	/* Add the closing tags required */
 	if (max_length != 0)
 		print_size = max_length - (size_t)offset;
 
-	offset += snprintf(buffer + offset, print_size, "</feature></target>");
+	offset += snprintf(buffer + offset, print_size, "</target>");
 	/* offset is now the total length of the string created, discard the sign and return it. */
 	return (size_t)offset;
 }
