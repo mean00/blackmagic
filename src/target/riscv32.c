@@ -148,37 +148,42 @@ static void riscv32_regs_write(target_s *const target, const void *const data)
 	riscv_csr_write(hart, RV_DPC, &regs->pc);
 }
 
-static ssize_t riscv32_reg_read(target_s *target, int c, void *data, size_t max)
+static ssize_t riscv32_bool_to_4(bool ret)
 {
-	(void)max;
-
-	riscv_hart_s *const hart = riscv_hart_struct(target);
-	// TODO check size
-	if (c == 32) {
-		riscv_csr_read(hart, RV_DPC, data);
+	if (ret)
 		return 4;
-	}
-	if (c < 32) {
-		riscv_csr_read(hart, RV_GPR_BASE + c, data);
-		return 4;
-	}
 	return -1;
 }
 
-static ssize_t riscv32_reg_write(target_s *const target, int c, const void *data, size_t max)
+static ssize_t riscv32_reg_read(target_s *target, int reg, void *data, size_t max)
 {
-	(void)max;
-	/* Grab the hart structure and figure out how many registers need reading out */
+	if (max < 4) {
+		return -1;
+	}
+	/* Grab the hart structure  */
 	riscv_hart_s *const hart = riscv_hart_struct(target);
-	// TODO check size
-	if (c == 32) {
-		riscv_csr_write(hart, RV_DPC, data);
-		return 4;
+	if (reg < 32)
+		return riscv32_bool_to_4(riscv_csr_read(hart, RV_GPR_BASE + reg, data));
+	if (reg == 32)
+		return riscv32_bool_to_4(riscv_csr_read(hart, RV_DPC, data));
+	if (reg >= RV_CSR_GDB_OFFSET)
+		return riscv32_bool_to_4(riscv_csr_read(hart, reg - RV_CSR_GDB_OFFSET, data));
+	return -1;
+}
+
+static ssize_t riscv32_reg_write(target_s *const target, int reg, const void *data, size_t max)
+{
+	if (max != 4) {
+		return -1;
 	}
-	if (c < 32) {
-		riscv_csr_write(hart, RV_GPR_BASE + c, data);
-		return 4;
-	}
+	/* Grab the hart structure  */
+	riscv_hart_s *const hart = riscv_hart_struct(target);
+	if (reg < 32)
+		return riscv32_bool_to_4(riscv_csr_write(hart, RV_GPR_BASE + reg, data));
+	if (reg == 32)
+		return riscv32_bool_to_4(riscv_csr_write(hart, RV_DPC, data));
+	if (reg >= RV_CSR_GDB_OFFSET)
+		return riscv32_bool_to_4(riscv_csr_write(hart, reg - RV_CSR_GDB_OFFSET, data));
 	return -1;
 }
 

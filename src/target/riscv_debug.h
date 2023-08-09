@@ -178,7 +178,9 @@ typedef struct riscv_hart {
 #define RV_TRIGGER_MODE_MASK          0xffff0000U
 #define RV_TRIGGER_SUPPORT_BREAKWATCH 0x00000004U
 
-// The CSR id when reported by GDB is shifted so they cannot collide with GPR registers
+// The CSR id when reported by GDB is shifted by RV_CSR_GDB_OFFSET
+// so they cannot collide with GPR registers, so you have to substract
+// RV_CSR_GDB_OFFSET from the value received from gdb
 #define RV_CSR_GDB_OFFSET 128
 #define RV_CSR_STATUS     0x300
 #define RV_CSR_MIE        0x304
