@@ -183,6 +183,7 @@ typedef struct riscv_hart {
 // RV_CSR_GDB_OFFSET from the value received from gdb
 #define RV_CSR_GDB_OFFSET 128
 #define RV_CSR_STATUS     0x300
+#define RV_CSR_MISA       0x301
 #define RV_CSR_MIE        0x304
 #define RV_CSR_MTVEC      0x305
 #define RV_CSR_MEPC       0x341

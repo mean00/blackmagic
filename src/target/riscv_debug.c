@@ -147,6 +147,7 @@ struct riscv_csr_descriptor  {
 
 
 static const riscv_csr_descriptor_s riscv_csrs[]={
+	{"misa",RV_CSR_MISA},
 	{"mstatus",RV_CSR_STATUS},
 	{"mie",	RV_CSR_MIE},
 	{"mtvec",	RV_CSR_MTVEC},
