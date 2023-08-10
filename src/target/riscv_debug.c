@@ -146,15 +146,18 @@ struct riscv_csr_descriptor  {
 };
 
 
-static const riscv_csr_descriptor_s riscv_csrs[]={
-	{"misa",RV_CSR_MISA},
+static const riscv_csr_descriptor_s riscv_csrs[]={	
 	{"mstatus",RV_CSR_STATUS},
+	{"misa",RV_CSR_MISA},
 	{"mie",	RV_CSR_MIE},
 	{"mtvec",	RV_CSR_MTVEC},
+	{"mscratch",RV_CSR_MSCRATCH},
 	{"mepc",	RV_CSR_MEPC},
 	{"mcause",RV_CSR_MCAUSE},
 	{"mtval",	RV_CSR_MTVAL},
 	{"mip",	RV_CSR_MIP},
+	
+	
 };
 
 // clang-format on

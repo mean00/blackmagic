@@ -186,6 +186,7 @@ typedef struct riscv_hart {
 #define RV_CSR_MISA       0x301
 #define RV_CSR_MIE        0x304
 #define RV_CSR_MTVEC      0x305
+#define RV_CSR_MSCRATCH   0x340
 #define RV_CSR_MEPC       0x341
 #define RV_CSR_MCAUSE     0x342
 #define RV_CSR_MTVAL      0x343
