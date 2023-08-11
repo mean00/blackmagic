@@ -121,9 +121,9 @@ static void stm32f1_add_flash(target_s *target, uint32_t addr, size_t length, si
 	flash->start = addr;
 	flash->length = length;
 	flash->blocksize = erasesize;
+	flash->writesize = 1024U;
 	flash->erase = stm32f1_flash_erase;
 	flash->write = stm32f1_flash_write;
-	flash->writesize = erasesize;
 	flash->erased = 0xff;
 	target_add_flash(target, flash);
 }
@@ -185,7 +185,7 @@ bool gd32f1_probe(target_s *target)
 /* Identify RISC-V GD32VF1 chips */
 bool gd32vf1_probe(target_s *const target)
 {
-	/* Make sure the architechture ID matches */
+	/* Make sure the architecture ID matches */
 	if (target->cpuid != 0x80000022U)
 		return false;
 	/* Then read out the device ID */
@@ -363,7 +363,7 @@ static bool at32f43_detect(target_s *target, const uint16_t part_id)
 	 * Out of 640 KB SRAM present on silicon, at least 128 KB are always
 	 * dedicated to "zero-wait-state Flash". ZW region is limited by
 	 * specific part flash capacity (for 256, 448 KB) or at 512 KB.
-	 * AT32F435ZMT default EOPB0=0xffff05fa, 
+	 * AT32F435ZMT default EOPB0=0xffff05fa,
 	 * EOPB[0:2]=0b010 for 384 KB SRAM + 256 KB zero-wait-state flash.
 	 */
 	target->driver = "AT32F435";
@@ -393,12 +393,10 @@ bool at32fxx_probe(target_s *target)
 }
 
 /*
-   mm32l0 flash write
-   On stm32, 16-bit writes use bits 0:15 for even halfwords; bits 16:31 for odd halfwords.
-   On mm32 cortex-m0, 16-bit writes always use bits 0:15.
-   Set both halfwords to the same value, works on both stm32 and mm32.
-*/
-
+ * On STM32, 16-bit writes use bits 0:15 for even halfwords; bits 16:31 for odd halfwords.
+ * On MM32 cortex-m0, 16-bit writes always use bits 0:15.
+ * Set both halfwords to the same value, works on both STM32 and NN32.
+ */
 void mm32l0_mem_write_sized(adiv5_access_port_s *ap, uint32_t dest, const void *src, size_t len, align_e align)
 {
 	uint32_t odest = dest;
@@ -456,7 +454,7 @@ bool mm32l0xx_probe(target_s *target)
 
 	const uint32_t mm32_id = target_mem_read32(target, DBGMCU_IDCODE_MM32L0);
 	if (target_check_error(target)) {
-		DEBUG_ERROR("mm32l0xx_probe: read error at 0x%" PRIx32 "\n", (uint32_t)DBGMCU_IDCODE_MM32L0);
+		DEBUG_ERROR("%s: read error at 0x%" PRIx32 "\n", __func__, (uint32_t)DBGMCU_IDCODE_MM32L0);
 		return false;
 	}
 	switch (mm32_id) {
@@ -474,7 +472,7 @@ bool mm32l0xx_probe(target_s *target)
 	case 0xffffffffU:
 		return false;
 	default:
-		DEBUG_WARN("mm32l0xx_probe: unknown mm32 dev_id 0x%" PRIx32 "\n", mm32_id);
+		DEBUG_WARN("%s: unknown mm32 dev_id 0x%" PRIx32 "\n", __func__, mm32_id);
 		return false;
 	}
 	target->part_id = mm32_id & 0xfffU;
@@ -490,16 +488,15 @@ bool mm32l0xx_probe(target_s *target)
 /* Identify MM32 devices (Cortex-M3, Star-MC1) */
 bool mm32f3xx_probe(target_s *target)
 {
-	uint32_t mm32_id;
-	const char *name = "?";
+	const char *name;
 	size_t flash_kbyte = 0;
 	size_t ram1_kbyte = 0; /* ram at 0x20000000 */
 	size_t ram2_kbyte = 0; /* ram at 0x30000000 */
 	size_t block_size = 0x400U;
 
-	mm32_id = target_mem_read32(target, DBGMCU_IDCODE_MM32F3);
+	const uint32_t mm32_id = target_mem_read32(target, DBGMCU_IDCODE_MM32F3);
 	if (target_check_error(target)) {
-		DEBUG_ERROR("mm32f3xx_probe: read error at 0x%" PRIx32 "\n", (uint32_t)DBGMCU_IDCODE_MM32F3);
+		DEBUG_ERROR("%s: read error at 0x%" PRIx32 "\n", __func__, (uint32_t)DBGMCU_IDCODE_MM32F3);
 		return false;
 	}
 	switch (mm32_id) {
@@ -518,7 +515,7 @@ bool mm32f3xx_probe(target_s *target)
 	case 0xffffffffU:
 		return false;
 	default:
-		DEBUG_WARN("mm32f3xx_probe: unknown mm32 dev_id 0x%" PRIx32 "\n", mm32_id);
+		DEBUG_WARN("%s: unknown mm32 ID code 0x%" PRIx32 "\n", __func__, mm32_id);
 		return false;
 	}
 	target->part_id = mm32_id & 0xfffU;
@@ -681,32 +678,29 @@ static uint32_t stm32f1_bank_offset_for(target_addr_t addr)
 	return FLASH_BANK1_OFFSET;
 }
 
-static bool stm32f1_flash_erase(target_flash_s *flash, target_addr_t addr, size_t len)
+static bool stm32f1_flash_erase(target_flash_s *flash, target_addr_t addr, size_t length)
 {
 	target_s *target = flash->t;
-	target_addr_t end = addr + len - 1U;
+	target_addr_t end = addr + length - 1U;
+	DEBUG_TARGET("%s: at %08" PRIx32 "\n", __func__, addr);
 
 	/* Unlocked an appropriate flash bank */
 	if ((target->part_id == 0x430U && end >= FLASH_BANK_SPLIT && !stm32f1_flash_unlock(target, FLASH_BANK2_OFFSET)) ||
 		(addr < FLASH_BANK_SPLIT && !stm32f1_flash_unlock(target, 0)))
 		return false;
 
-	for (size_t offset = 0; offset < len; offset += flash->blocksize) {
-		const uint32_t bank_offset = stm32f1_bank_offset_for(addr + offset);
-		stm32f1_flash_clear_eop(target, bank_offset);
+	const uint32_t bank_offset = stm32f1_bank_offset_for(addr);
+	stm32f1_flash_clear_eop(target, bank_offset);
 
-		/* Flash page erase instruction */
-		target_mem_write32(target, FLASH_CR + bank_offset, FLASH_CR_PER);
-		/* write address to FMA */
-		target_mem_write32(target, FLASH_AR + bank_offset, addr + offset);
-		/* Flash page erase start instruction */
-		target_mem_write32(target, FLASH_CR + bank_offset, FLASH_CR_STRT | FLASH_CR_PER);
+	/* Flash page erase instruction */
+	target_mem_write32(target, FLASH_CR + bank_offset, FLASH_CR_PER);
+	/* write address to FMA */
+	target_mem_write32(target, FLASH_AR + bank_offset, addr);
+	/* Flash page erase start instruction */
+	target_mem_write32(target, FLASH_CR + bank_offset, FLASH_CR_STRT | FLASH_CR_PER);
 
-		/* Wait for completion or an error */
-		if (!stm32f1_flash_busy_wait(target, bank_offset, NULL))
-			return false;
-	}
-	return true;
+	/* Wait for completion or an error */
+	return stm32f1_flash_busy_wait(target, bank_offset, NULL);
 }
 
 static size_t stm32f1_bank1_length(target_addr_t addr, size_t len)
@@ -722,6 +716,7 @@ static bool stm32f1_flash_write(target_flash_s *flash, target_addr_t dest, const
 {
 	target_s *target = flash->t;
 	const size_t offset = stm32f1_bank1_length(dest, len);
+	DEBUG_TARGET("%s: at %08" PRIx32 " for %zu bytes\n", __func__, dest, len);
 
 	/* Start by writing any bank 1 data */
 	if (offset) {

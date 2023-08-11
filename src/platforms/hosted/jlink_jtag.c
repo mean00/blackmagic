@@ -46,15 +46,13 @@ static const uint8_t jlink_switch_to_jtag_seq[9U] = {0xffU, 0xffU, 0xffU, 0xffU,
 bool jlink_jtag_init(void)
 {
 	DEBUG_PROBE("-> jlink_jtag_init\n");
+
 	/* Try to switch the adaptor into JTAG mode */
-	uint8_t res[4];
-	if (!(jlink_interfaces & JLINK_IF_JTAG) ||
-		jlink_simple_request(JLINK_CMD_TARGET_IF, JLINK_IF_GET_AVAILABLE, res, sizeof(res)) < 0 ||
-		!(res[0] & JLINK_IF_JTAG) || jlink_simple_request(JLINK_CMD_TARGET_IF, SELECT_IF_JTAG, res, sizeof(res)) < 0) {
-		DEBUG_ERROR("JTAG not available\n");
+	if (!jlink_select_interface(JLINK_INTERFACE_JTAG)) {
+		DEBUG_ERROR("Failed to select JTAG interface\n");
 		return false;
 	}
-	platform_delay(10);
+
 	/* Ensure we're in JTAG mode */
 	DEBUG_PROBE("%s: Switch to JTAG\n", __func__);
 	if (!jlink_transfer(sizeof(jlink_switch_to_jtag_seq) * 8U, jlink_switch_to_jtag_seq, NULL, NULL)) {

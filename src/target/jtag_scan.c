@@ -73,7 +73,7 @@ void jtag_add_device(const uint32_t dev_index, const jtag_dev_s *jtag_dev)
  * and inspection. Finally, we loop through seeing if we understand any of the
  * ID codes seen and dispatching to suitable handlers if we do.
  */
-uint32_t jtag_scan(void)
+bool jtag_scan(void)
 {
 	/* Free the device list if any, and clean state ready */
 	target_list_free();
@@ -89,7 +89,7 @@ uint32_t jtag_scan(void)
 #if PC_HOSTED == 1
 	if (!bmda_jtag_init()) {
 		DEBUG_ERROR("JTAG not available\n");
-		return 0;
+		return false;
 	}
 #else
 	jtagtap_init();
@@ -99,7 +99,7 @@ uint32_t jtag_scan(void)
 	if (!jtag_read_idcodes() ||
 		/* Otherwise, try and learn the chain IR lengths */
 		!jtag_read_irs())
-		return 0;
+		return false;
 
 	/* IRs are all succesfully accounted for, so clean up and do housekeeping */
 	DEBUG_INFO("Return to Run-Test/Idle\n");
@@ -108,7 +108,7 @@ uint32_t jtag_scan(void)
 
 	/* All devices should be in BYPASS now so do the sanity check */
 	if (!jtag_sanity_check())
-		return 0;
+		return false;
 
 	/* Fill in the ir_postscan fields */
 	uint8_t postscan = 0;
@@ -142,8 +142,6 @@ uint32_t jtag_scan(void)
 	for (size_t device = 0; device < jtag_dev_count; device++) {
 		for (size_t descr = 0; dev_descr[descr].idcode; descr++) {
 			if ((jtag_devs[device].jd_idcode & dev_descr[descr].idmask) == dev_descr[descr].idcode) {
-				/* Save description in table */
-				jtag_devs[device].jd_descr = dev_descr[descr].descr;
 				/* Call handler to initialise/probe device further */
 				if (dev_descr[descr].handler)
 					dev_descr[descr].handler(device);
@@ -152,7 +150,7 @@ uint32_t jtag_scan(void)
 		}
 	}
 
-	return jtag_dev_count;
+	return jtag_dev_count > 0;
 }
 
 static bool jtag_read_idcodes(void)

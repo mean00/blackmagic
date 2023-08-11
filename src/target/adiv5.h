@@ -42,6 +42,25 @@
 #define ADIV5_DP_RDBUFF    ADIV5_DP_REG(0xcU)
 #define ADIV5_DP_TARGETSEL ADIV5_DP_REG(0xcU)
 
+/* ADIv5 SWD/JTAG Select Sequence */
+#define ADIV5_SWD_TO_JTAG_SELECT_SEQUENCE 0xe73cU /* 16 bits, LSB (MSB: 0x3ce7) */
+#define ADIV5_JTAG_TO_SWD_SELECT_SEQUENCE 0xe79eU /* 16 bits, LSB (MSB: 0x79e7) */
+
+/*
+ * ADIv5 Selection Alert sequence
+ * This sequence is sent MSB first and can be represented as either:
+ * - 0x49cf9046 a9b4a161 97f5bbc7 45703d98 transmitted MSB first
+ * - 0x19bc0ea2 e3ddafe9 86852d95 6209f392 transmitted LSB first
+ */
+#define ADIV5_SELECTION_ALERT_SEQUENCE_0 0x6209f392U /* 32 bits, LSB */
+#define ADIV5_SELECTION_ALERT_SEQUENCE_1 0x86852d95U /* 32 bits, LSB */
+#define ADIV5_SELECTION_ALERT_SEQUENCE_2 0xe3ddafe9U /* 32 bits, LSB */
+#define ADIV5_SELECTION_ALERT_SEQUENCE_3 0x19bc0ea2U /* 32 bits, LSB */
+
+/* ADIv5 Dormant state activation codes */
+#define ADIV5_ACTIVATION_CODE_ARM_SWD_DP  0x1aU /* 8bits, LSB (MSB: 0x58) */
+#define ADIV5_ACTIVATION_CODE_ARM_JTAG_DP 0x0aU /* 8bits, LSB (MSB: 0x50) */
+
 /* DP DPIDR */
 #define ADIV5_DP_DPIDR_REVISION_OFFSET 28U
 #define ADIV5_DP_DPIDR_REVISION_MASK   (0xfU << ADIV5_DP_DPIDR_VERSION_OFFSET)
@@ -137,7 +156,10 @@
 #define ADIV5_AP_CSW_MASTERTYPE_DEBUG (1U << 29U)
 #define ADIV5_AP_CSW_HPROT1           (1U << 25U)
 #define ADIV5_AP_CSW_SPIDEN           (1U << 23U)
-/* Bits 22:12 - Reserved */
+/* Bits 22:16 - Reserved */
+/* Bit 15 - MTE (Memory Tagging Enable) for AXI busses */
+#define ADIV5_AP_CSW_MTE (1U << 15U)
+/* Bits 14:12 - Reserved */
 /* Bits 11:8 - Mode, must be zero */
 #define ADIV5_AP_CSW_TRINPROG       (1U << 7U)
 #define ADIV5_AP_CSW_DEVICEEN       (1U << 6U)
@@ -383,5 +405,9 @@ uint32_t firmware_swdp_error(adiv5_debug_port_s *dp, bool protocol_recovery);
 
 void firmware_swdp_abort(adiv5_debug_port_s *dp, uint32_t abort);
 void adiv5_jtagdp_abort(adiv5_debug_port_s *dp, uint32_t abort);
+
+void adiv5_swd_multidrop_scan(adiv5_debug_port_s *dp, uint32_t targetid);
+
+uint32_t adiv5_dp_read_dpidr(adiv5_debug_port_s *dp);
 
 #endif /* TARGET_ADIV5_H */

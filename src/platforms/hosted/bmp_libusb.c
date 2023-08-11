@@ -5,7 +5,7 @@
  * Copyright (C) 2022-2023 1BitSquared <info@1bitsquared.com>
  * Written by Sid Price <sid@sidprice.com>
  * Written by Rachel Mant <git@dragonmux.network>
- * 
+ *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation, either version 3 of the License, or
@@ -97,12 +97,11 @@ bmp_type_t get_type_from_vid_pid(const uint16_t probe_vid, const uint16_t probe_
 
 void bmp_ident(bmp_info_s *info)
 {
-	DEBUG_INFO("Black Magic Debug App %s\n for Black Magic Probe, ST-Link v2 and v3, CMSIS-DAP, "
-			   "J-Link and FTDI (MPSSE)\n",
-		FIRMWARE_VERSION);
+	DEBUG_INFO("Black Magic Debug App " FIRMWARE_VERSION "\n for Black Magic Probe, ST-Link v2 and v3, CMSIS-DAP, "
+			   "J-Link and FTDI (MPSSE)\n");
 	if (info && info->vid && info->pid) {
-		DEBUG_INFO("Using %04x:%04x %s %s\n %s\n", info->vid, info->pid,
-			(info->serial[0]) ? info->serial : NO_SERIAL_NUMBER, info->manufacturer, info->product);
+		DEBUG_INFO("Using %04x:%04x %s %s\n %s %s\n", info->vid, info->pid,
+			(info->serial[0]) ? info->serial : NO_SERIAL_NUMBER, info->manufacturer, info->product, info->version);
 	}
 }
 
@@ -119,8 +118,13 @@ void libusb_exit_function(bmp_info_s *info)
 static char *get_device_descriptor_string(libusb_device_handle *handle, uint16_t string_index)
 {
 	char read_string[128] = {0};
-	if (string_index != 0)
-		libusb_get_string_descriptor_ascii(handle, string_index, (uint8_t *)read_string, sizeof(read_string));
+	if (string_index != 0) {
+		const int result =
+			libusb_get_string_descriptor_ascii(handle, string_index, (uint8_t *)read_string, sizeof(read_string));
+		if (result < LIBUSB_SUCCESS)
+			DEBUG_ERROR(
+				"%s: Failed to read string from device (%d): %s\n", __func__, result, libusb_error_name(result));
+	}
 	return strdup(read_string);
 }
 
@@ -135,20 +139,21 @@ void bmp_read_product_version(libusb_device_descriptor_s *device_descriptor, lib
 	(void)device;
 	(void)serial;
 	(void)manufacturer;
-	char *start_of_version;
 	*product = get_device_descriptor_string(handle, device_descriptor->iProduct);
-	start_of_version = strrchr(*product, ' ');
+
+	char *start_of_version = strrchr(*product, ' ');
 	if (start_of_version == NULL) {
-		version = NULL;
-	} else {
-		while (start_of_version[0] == ' ' && start_of_version != *product)
-			--start_of_version;
-		start_of_version[1] = '\0';
-		start_of_version += 2;
-		while (start_of_version[0] == ' ')
-			++start_of_version;
-		*version = strdup(start_of_version);
+		*version = NULL;
+		return;
 	}
+
+	while (start_of_version[0] == ' ' && start_of_version != *product)
+		--start_of_version;
+	start_of_version[1] = '\0';
+	start_of_version += 2;
+	while (start_of_version[0] == ' ')
+		++start_of_version;
+	*version = strdup(start_of_version);
 }
 
 /*
@@ -570,7 +575,8 @@ int find_debuggers(bmda_cli_options_s *cl_opts, bmp_info_s *info)
  *   sent/received may be less (per libusb's documentation). If used, rx_buffer must be
  *   suitably intialised up front to avoid UB reads when accessed.
  */
-int bmda_usb_transfer(usb_link_s *link, const void *tx_buffer, size_t tx_len, void *rx_buffer, size_t rx_len)
+int bmda_usb_transfer(
+	usb_link_s *link, const void *tx_buffer, size_t tx_len, void *rx_buffer, size_t rx_len, uint16_t timeout)
 {
 	/* If there's data to send */
 	if (tx_len) {
@@ -584,8 +590,8 @@ int bmda_usb_transfer(usb_link_s *link, const void *tx_buffer, size_t tx_len, vo
 		DEBUG_WIRE("\n");
 
 		/* Perform the transfer */
-		const int result =
-			libusb_bulk_transfer(link->device_handle, link->ep_tx | LIBUSB_ENDPOINT_OUT, tx_data, (int)tx_len, NULL, 0);
+		const int result = libusb_bulk_transfer(
+			link->device_handle, link->ep_tx | LIBUSB_ENDPOINT_OUT, tx_data, (int)tx_len, NULL, timeout);
 		/* Then decode the result value - if its anything other than LIBUSB_SUCCESS, something went horribly wrong */
 		if (result != LIBUSB_SUCCESS) {
 			DEBUG_ERROR(
@@ -601,7 +607,7 @@ int bmda_usb_transfer(usb_link_s *link, const void *tx_buffer, size_t tx_len, vo
 		int rx_bytes = 0;
 		/* Perform the transfer */
 		const int result = libusb_bulk_transfer(
-			link->device_handle, link->ep_rx | LIBUSB_ENDPOINT_IN, rx_data, (int)rx_len, &rx_bytes, 0);
+			link->device_handle, link->ep_rx | LIBUSB_ENDPOINT_IN, rx_data, (int)rx_len, &rx_bytes, timeout);
 		/* Then decode the result value - if its anything other than LIBUSB_SUCCESS, something went horribly wrong */
 		if (result != LIBUSB_SUCCESS) {
 			DEBUG_ERROR(

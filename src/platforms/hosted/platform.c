@@ -167,7 +167,7 @@ void platform_init(int argc, char **argv)
 	}
 }
 
-uint32_t bmp_swd_scan(uint32_t targetid)
+bool bmda_swd_scan(const uint32_t targetid)
 {
 	info.is_jtag = false;
 	platform_max_frequency_set(cl_opts.opt_max_swj_frequency);
@@ -177,8 +177,7 @@ uint32_t bmp_swd_scan(uint32_t targetid)
 	case BMP_TYPE_FTDI:
 	case BMP_TYPE_CMSIS_DAP:
 	case BMP_TYPE_JLINK:
-		return adiv5_swdp_scan(targetid);
-		break;
+		return adiv5_swd_scan(targetid);
 
 #if HOSTED_BMP_ONLY == 0
 	case BMP_TYPE_STLINK_V2:
@@ -186,7 +185,7 @@ uint32_t bmp_swd_scan(uint32_t targetid)
 #endif
 
 	default:
-		return 0;
+		return false;
 	}
 }
 #if HOSTED_BMP_ONLY == 0
@@ -240,7 +239,7 @@ void bmda_add_jtag_dev(const uint32_t dev_index, const jtag_dev_s *const jtag_de
 		remote_add_jtag_dev(dev_index, jtag_dev);
 }
 
-uint32_t bmda_jtag_scan(void)
+bool bmda_jtag_scan(void)
 {
 	info.is_jtag = true;
 
@@ -259,7 +258,7 @@ uint32_t bmda_jtag_scan(void)
 #endif
 
 	default:
-		return 0;
+		return false;
 	}
 }
 
@@ -372,7 +371,7 @@ const char *platform_target_voltage(void)
 		return ftdi_target_voltage();
 
 	case BMP_TYPE_JLINK:
-		return jlink_target_voltage();
+		return jlink_target_voltage_string();
 
 	case BMP_TYPE_WCHLINK:
 		return wchlink_target_voltage(&info);
@@ -508,18 +507,20 @@ uint32_t platform_max_frequency_get(void)
 	}
 }
 
-void platform_target_set_power(const bool power)
+bool platform_target_set_power(const bool power)
 {
 	switch (info.bmp_type) {
 	case BMP_TYPE_BMP:
-		if (remote_target_set_power(power))
-			DEBUG_INFO("Powering up device!\n");
-		else
-			DEBUG_ERROR("Powering up device unimplemented or failed\n");
-		break;
+		return remote_target_set_power(power);
+
+#if HOSTED_BMP_ONLY == 0
+	case BMP_TYPE_JLINK:
+		return jlink_target_set_power(power);
+#endif
 
 	default:
-		break;
+		DEBUG_ERROR("Target power not available or not yet implemented\n");
+		return false;
 	}
 }
 
@@ -529,6 +530,11 @@ bool platform_target_get_power(void)
 	case BMP_TYPE_BMP:
 		return remote_target_get_power();
 
+#if HOSTED_BMP_ONLY == 0
+	case BMP_TYPE_JLINK:
+		return jlink_target_get_power();
+#endif
+
 	default:
 		return false;
 	}
@@ -536,7 +542,7 @@ bool platform_target_get_power(void)
 
 uint32_t platform_target_voltage_sense(void)
 {
-	uint32_t targetVoltage = 0;
+	uint32_t target_voltage = 0;
 
 	switch (info.bmp_type) {
 	case BMP_TYPE_BMP: {
@@ -545,16 +551,22 @@ uint32_t platform_target_voltage_sense(void)
 			uint32_t units = 0;
 			uint32_t tenths = 0;
 			sscanf(result, "%" PRIu32 ".%" PRIu32, &units, &tenths);
-			targetVoltage = (units * 10U) + tenths;
+			target_voltage = (units * 10U) + tenths;
 		}
 		break;
 	}
+
+#if HOSTED_BMP_ONLY == 0
+	case BMP_TYPE_JLINK:
+		target_voltage = jlink_target_voltage_sense();
+		break;
+#endif
 
 	default:
 		break;
 	}
 
-	return targetVoltage;
+	return target_voltage;
 }
 
 void platform_buffer_flush(void)

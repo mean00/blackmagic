@@ -1,10 +1,11 @@
 /*
  * This file is part of the Black Magic Debug project.
  *
- * Copyright (C) 2011  Black Sphere Technologies Ltd.
+ * Copyright (C) 2011 Black Sphere Technologies Ltd.
  * Written by Gareth McMullin <gareth@blacksphere.co.nz>
- * Copyright (C) 2021 Uwe Bonnes
- *                            (bon@elektron.ikp.physik.tu-darmstadt.de)
+ * Copyright (C) 2021 Uwe Bonnes (bon@elektron.ikp.physik.tu-darmstadt.de)
+ * Copyright (C) 2023 1BitSquared <info@1bitsquared.com>
+ * Modified by Rachel Mant <git@dragonmux.network>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -54,8 +55,8 @@ static bool cmd_version(target_s *t, int argc, const char **argv);
 static bool cmd_help(target_s *t, int argc, const char **argv);
 
 static bool cmd_jtag_scan(target_s *target, int argc, const char **argv);
-/*static*/ bool cmd_swdp_scan(target_s *t, int argc, const char **argv);
-/*static*/ bool cmd_rvswdp_scan(target_s *t, int argc, const char **argv);
+static bool cmd_swd_scan(target_s *t, int argc, const char **argv);
+static bool cmd_rvswdp_scan(target_s *t, int argc, const char **argv);
 static bool cmd_auto_scan(target_s *t, int argc, const char **argv);
 static bool cmd_frequency(target_s *t, int argc, const char **argv);
 static bool cmd_targets(target_s *t, int argc, const char **argv);
@@ -85,7 +86,8 @@ const command_s cmd_list[] = {
 	{"version", cmd_version, "Display firmware version info"},
 	{"help", cmd_help, "Display help for monitor commands"},
 	{"jtag_scan", cmd_jtag_scan, "Scan JTAG chain for devices"},
-	{"swdp_scan", cmd_swdp_scan, "Scan SW-DP for devices: [TARGET_ID]"},
+	{"swd_scan", cmd_swd_scan, "Scan SWD interface for devices: [TARGET_ID]"},
+	{"swdp_scan", cmd_swd_scan, "Deprecated: use swd_scan instead"},
 	{"rvswdp_scan", cmd_rvswdp_scan, "Scan RVSWD for devices"},
 	{"auto_scan", cmd_auto_scan, "Automatically scan all chain types for devices"},
 	{"frequency", cmd_frequency, "set minimum high and low times: [FREQ]"},
@@ -213,13 +215,13 @@ static bool cmd_jtag_scan(target_s *target, int argc, const char **argv)
 	if (connect_assert_nrst)
 		platform_nrst_set_val(true); /* will be deasserted after attach */
 
-	uint32_t devs = 0;
+	bool scan_result = false;
 	volatile exception_s e;
 	TRY_CATCH (e, EXCEPTION_ALL) {
 #if PC_HOSTED == 1
-		devs = bmda_jtag_scan();
+		scan_result = bmda_jtag_scan();
 #else
-		devs = jtag_scan();
+		scan_result = jtag_scan();
 #endif
 	}
 	switch (e.type) {
@@ -231,7 +233,7 @@ static bool cmd_jtag_scan(target_s *target, int argc, const char **argv)
 		break;
 	}
 
-	if (devs == 0) {
+	if (!scan_result) {
 		platform_target_clk_output_enable(false);
 		platform_nrst_set_val(false);
 		gdb_out("JTAG device scan failed!\n");
@@ -244,7 +246,7 @@ static bool cmd_jtag_scan(target_s *target, int argc, const char **argv)
 	return true;
 }
 
-bool cmd_swdp_scan(target_s *t, int argc, const char **argv)
+bool cmd_swd_scan(target_s *t, int argc, const char **argv)
 {
 	(void)t;
 	volatile uint32_t targetid = 0;
@@ -256,13 +258,13 @@ bool cmd_swdp_scan(target_s *t, int argc, const char **argv)
 	if (connect_assert_nrst)
 		platform_nrst_set_val(true); /* will be deasserted after attach */
 
-	uint32_t devs = 0;
+	bool scan_result = false;
 	volatile exception_s e;
 	TRY_CATCH (e, EXCEPTION_ALL) {
 #if PC_HOSTED == 1
-		devs = bmp_swd_scan(targetid);
+		scan_result = bmda_swd_scan(targetid);
 #else
-		devs = adiv5_swdp_scan(targetid);
+		scan_result = adiv5_swd_scan(targetid);
 #endif
 	}
 	switch (e.type) {
@@ -274,7 +276,7 @@ bool cmd_swdp_scan(target_s *t, int argc, const char **argv)
 		break;
 	}
 
-	if (devs == 0) {
+	if (!scan_result) {
 		platform_target_clk_output_enable(false);
 		platform_nrst_set_val(false);
 		gdb_out("SW-DP scan failed!\n");
@@ -341,24 +343,24 @@ bool cmd_auto_scan(target_s *t, int argc, const char **argv)
 	if (connect_assert_nrst)
 		platform_nrst_set_val(true); /* will be deasserted after attach */
 
-	uint32_t devs = 0;
+	bool scan_result = false;
 	volatile exception_s e;
 	TRY_CATCH (e, EXCEPTION_ALL) {
 #if PC_HOSTED == 1
-		devs = bmda_jtag_scan();
+		scan_result = bmda_jtag_scan();
 #else
-		devs = jtag_scan();
+		scan_result = jtag_scan();
 #endif
-		if (devs > 0)
+		if (scan_result)
 			break;
 		gdb_out("JTAG scan found no devices, trying SWD!\n");
 
 #if PC_HOSTED == 1
-		devs = bmp_swd_scan(0);
+		scan_result = bmda_swd_scan(0);
 #else
-		devs = adiv5_swdp_scan(0);
+		scan_result = adiv5_swd_scan(0);
 #endif
-		if (devs > 0)
+		if (scan_result)
 			break;
 
 		gdb_out("SW-DP scan found no devices.\n");
@@ -372,7 +374,7 @@ bool cmd_auto_scan(target_s *t, int argc, const char **argv)
 		break;
 	}
 
-	if (devs == 0) {
+	if (!scan_result) {
 		platform_target_clk_output_enable(false);
 		platform_nrst_set_val(false);
 		gdb_out("auto scan failed!\n");
@@ -531,7 +533,8 @@ static bool cmd_target_power(target_s *t, int argc, const char **argv)
 				/* want to enable target power, but VREF > 0.5V sensed -> cancel */
 				gdb_outf("Target already powered (%s)\n", platform_target_voltage());
 			} else {
-				platform_target_set_power(want_enable);
+				if (!platform_target_set_power(want_enable))
+					DEBUG_ERROR("%s target power failed\n", want_enable ? "Enabling" : "Disabling");
 				gdb_outf("%s target power\n", want_enable ? "Enabling" : "Disabling");
 			}
 		}

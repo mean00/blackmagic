@@ -86,15 +86,12 @@ static uint32_t jlink_adiv5_raw_access(adiv5_debug_port_s *dp, uint8_t rnw, uint
 bool jlink_swd_init(adiv5_debug_port_s *dp)
 {
 	DEBUG_PROBE("-> jlink_swd_init(%u)\n", dp->dev_index);
+
 	/* Try to switch the adaptor into SWD mode */
-	uint8_t res[4];
-	if (!(jlink_interfaces & JLINK_IF_SWD) ||
-		jlink_simple_request(JLINK_CMD_TARGET_IF, JLINK_IF_GET_AVAILABLE, res, sizeof(res)) < 0 ||
-		!(res[0] & JLINK_IF_SWD) || jlink_simple_request(JLINK_CMD_TARGET_IF, SELECT_IF_SWD, res, sizeof(res)) < 0) {
-		DEBUG_ERROR("SWD not available\n");
+	if (!jlink_select_interface(JLINK_INTERFACE_SWD)) {
+		DEBUG_ERROR("Failed to select SWD interface\n");
 		return false;
 	}
-	platform_delay(10);
 
 	/* Set up the underlying SWD functions using the implementation below */
 	swd_proc.seq_in = jlink_swd_seq_in;

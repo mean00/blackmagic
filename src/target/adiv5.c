@@ -3,8 +3,9 @@
  *
  * Copyright (C) 2015  Black Sphere Technologies Ltd.
  * Written by Gareth McMullin <gareth@blacksphere.co.nz>
- * Copyright (C) 2018 - 2021 Uwe Bonnes
- *                           (bon@elektron.ikp.physik.tu-darmstadt.de)
+ * Copyright (C) 2018-2021 Uwe Bonnes (bon@elektron.ikp.physik.tu-darmstadt.de)
+ * Copyright (C) 2022-2023 1BitSquared <info@1bitsquared.com>
+ * Modified by Rachel Mant <git@dragonmux.network>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -20,10 +21,11 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-/* This file implements the transport generic functions.
- * See the following ARM Reference Documents:
+/*
+ * This file implements transport generic ADIv5 functions.
  *
- * ARM Debug Interface v5 Architecture Specification, ARM IHI 0031E
+ * See the following ARM Reference Documents:
+ * - ARM Debug Interface v5 Architecture Specification, ARM IHI 0031E
  */
 #include "general.h"
 #include "target.h"
@@ -37,16 +39,17 @@
 #include "bmp_hosted.h"
 #endif
 
-/* All this should probably be defined in a dedicated ADIV5 header, so that they
+/*
+ * All this should probably be defined in a dedicated ADIV5 header, so that they
  * are consistently named and accessible when needed in the codebase.
  */
 
-/* Values from ST RM0436 (STM32MP157), 66.9 APx_IDR
- * and ST RM0438 (STM32L5) 52.3.1, AP_IDR */
-#define ARM_AP_TYPE_AHB  1U
-#define ARM_AP_TYPE_APB  3U
-#define ARM_AP_TYPE_AXI  4U
-#define ARM_AP_TYPE_AHB5 5U
+/*
+ * This value is taken from the ADIv5 spec table C1-2
+ * "AP Identification types for an AP designed by Arm"
+ * §C1.3 pg146. This defines a AHB3 AP when the class value is 8
+ */
+#define ARM_AP_TYPE_AHB3 1U
 
 /* ROM table CIDR values */
 #define CIDR0_OFFSET 0xff0U /* DBGCID0 */
@@ -54,7 +57,8 @@
 #define CIDR2_OFFSET 0xff8U /* DBGCID2 */
 #define CIDR3_OFFSET 0xffcU /* DBGCID3 */
 
-/* Component class ID register can be broken down into the following logical
+/*
+ * Component class ID register can be broken down into the following logical
  * interpretation of the 32bit value consisting of the least significant bytes
  * of the 4 CID registers:
  * |7   ID3 reg   0|7   ID2 reg   0|7   ID1 reg   0|7   ID0 reg   0|
@@ -72,9 +76,7 @@
 #define CID_CLASS_MASK  UINT32_C(0x0000f000)
 #define CID_CLASS_SHIFT 12U
 
-/* The following enum is based on the Component Class value table 13-3 of the
- * ADIv5 standard.
- */
+/* The following enum is based on the Component Class value table 13-3 of the ADIv5 specification. */
 typedef enum cid_class {
 	cidc_gvc = 0x0,    /* Generic verification component*/
 	cidc_romtab = 0x1, /* ROM Table, std. layout (ADIv5 Chapter 14) */
@@ -145,7 +147,8 @@ typedef enum arm_arch {
 #define ARM_COMPONENT_STR(...)
 #endif
 
-/* The part number list was adopted from OpenOCD:
+/*
+ * The part number list was adopted from OpenOCD:
  * https://sourceforge.net/p/openocd/code/ci/406f4/tree/src/target/arm_adi_v5.c#l932
  *
  * The product ID register consists of several parts. For a full description
@@ -298,7 +301,7 @@ const char *adiv5_ap_type[] = {
 
 const char *adiv5_ap_map_type(const uint8_t ap_type, const uint8_t ap_class)
 {
-	/* type 0 APs are determined by the class code */
+	/* Type 0 APs are determined by the class code */
 	if (ap_type == 0U) {
 		if (ap_class == 0U)
 			return "JTAG-AP";
@@ -309,7 +312,7 @@ const char *adiv5_ap_map_type(const uint8_t ap_type, const uint8_t ap_class)
 	/* Anything type code less than 9U can be straight looked up in the table above */
 	if (ap_type < 9U)
 		return adiv5_ap_type[ap_type - 1U];
-	/* type 9U+ is reserved */
+	/* Type 9U+ is reserved */
 	return "Reserved";
 }
 #endif
@@ -494,7 +497,8 @@ static bool cortexm_prepare(adiv5_access_port_s *ap)
 
 static cid_class_e adiv5_class_from_cid(const uint16_t part_number, const uint16_t arch_id, const cid_class_e cid_class)
 {
-	/* Cortex-M23 and 33 incorrectly list their SCS's as a debug component,
+	/*
+	 * Cortex-M23 and 33 incorrectly list their SCS's as a debug component,
 	 * but they're a generic IP component, so we adjust the cid_class.
 	 */
 	if ((part_number == 0xd20U || part_number == 0xd21U) && arch_id == 0x2a04U && cid_class == cidc_dc)
@@ -504,7 +508,8 @@ static cid_class_e adiv5_class_from_cid(const uint16_t part_number, const uint16
 
 /*
  * Return true if we find a debuggable device.
- * NOLINTNEXTLINE(misc-no-recursion) */
+ * NOLINTNEXTLINE(misc-no-recursion)
+ */
 static void adiv5_component_probe(
 	adiv5_access_port_s *ap, uint32_t addr, const size_t recursion, const uint32_t num_entry)
 {
@@ -709,7 +714,7 @@ adiv5_access_port_s *adiv5_new_ap(adiv5_debug_port_s *dp, uint8_t apsel)
 		return NULL;
 	tmpap.csw = adiv5_ap_read(&tmpap, ADIV5_AP_CSW);
 	// XXX: We might be able to use the type field in ap->idr to determine if the AP supports TrustZone
-	tmpap.csw &= ~(ADIV5_AP_CSW_SIZE_MASK | ADIV5_AP_CSW_ADDRINC_MASK | ADIV5_AP_CSW_HNOSEC);
+	tmpap.csw &= ~(ADIV5_AP_CSW_SIZE_MASK | ADIV5_AP_CSW_ADDRINC_MASK | ADIV5_AP_CSW_MTE | ADIV5_AP_CSW_HNOSEC);
 	tmpap.csw |= ADIV5_AP_CSW_DBGSWENABLE;
 
 	if (tmpap.csw & ADIV5_AP_CSW_TRINPROG) {
@@ -774,7 +779,7 @@ static void adiv5_dp_clear_sticky_errors(adiv5_debug_port_s *dp)
 }
 
 /* Keep the TRY_CATCH funkiness contained to avoid clobbering and reduce the need for volatiles */
-static uint32_t adiv5_dp_read_dpidr(adiv5_debug_port_s *const dp)
+uint32_t adiv5_dp_read_dpidr(adiv5_debug_port_s *const dp)
 {
 	volatile uint32_t dpidr = 0;
 	volatile exception_s e;
@@ -819,13 +824,13 @@ void adiv5_dp_init(adiv5_debug_port_s *const dp, const uint32_t idcode)
 		dp->version = (dpidr & ADIV5_DP_DPIDR_VERSION_MASK) >> ADIV5_DP_DPIDR_VERSION_OFFSET;
 
 		/*
-		* The code in the DPIDR is in the form
-		* Bits 10:7 - JEP-106 Continuation code
-		* Bits 6:0 - JEP-106 Identity code
-		* here we convert it to our internal representation, See JEP-106 code list
-		*
-		* note: this is the code of the designer not the implementer, we expect it to be ARM
-		*/
+		 * The code in the DPIDR is in the form
+		 * Bits 10:7 - JEP-106 Continuation code
+		 * Bits 6:0 - JEP-106 Identity code
+		 * here we convert it to our internal representation, See JEP-106 code list
+		 *
+		 * note: this is the code of the designer not the implementer, we expect it to be ARM
+		 */
 		const uint16_t designer = (dpidr & ADIV5_DP_DPIDR_DESIGNER_MASK) >> ADIV5_DP_DPIDR_DESIGNER_OFFSET;
 		dp->designer_code =
 			(designer & ADIV5_DP_DESIGNER_JEP106_CONT_MASK) << 1U | (designer & ADIV5_DP_DESIGNER_JEP106_CODE_MASK);
@@ -834,7 +839,7 @@ void adiv5_dp_init(adiv5_debug_port_s *const dp, const uint32_t idcode)
 		/* Minimal Debug Port (MINDP) functions implemented */
 		dp->mindp = !!(dpidr & ADIV5_DP_DPIDR_MINDP);
 
-		/* 
+		/*
 		 * Check DPIDR validity
 		 * Designer code 0 is not a valid JEP-106 code
 		 * Version 0 is reserved for DPv0 which does not implement DPIDR
@@ -889,47 +894,32 @@ void adiv5_dp_init(adiv5_debug_port_s *const dp, const uint32_t idcode)
 		return;
 	}
 
-	/* Read DP Control/Status */
-	uint32_t ctrlstat = adiv5_dp_read(dp, ADIV5_DP_CTRLSTAT);
+	/* Start by resetting the DP contol state so the debug domain powers down */
+	adiv5_dp_write(dp, ADIV5_DP_CTRLSTAT, 0U);
+	uint32_t status = ADIV5_DP_CTRLSTAT_CSYSPWRUPACK | ADIV5_DP_CTRLSTAT_CDBGPWRUPACK;
+	/* Wait for the acknowledgements to go low */
+	while (status & (ADIV5_DP_CTRLSTAT_CSYSPWRUPACK | ADIV5_DP_CTRLSTAT_CDBGPWRUPACK))
+		status = adiv5_dp_read(dp, ADIV5_DP_CTRLSTAT);
 
 	platform_timeout_s timeout;
 	platform_timeout_set(&timeout, 201);
 	/* Write request for system and debug power up */
-	adiv5_dp_write(dp, ADIV5_DP_CTRLSTAT, ctrlstat | ADIV5_DP_CTRLSTAT_CSYSPWRUPREQ | ADIV5_DP_CTRLSTAT_CDBGPWRUPREQ);
+	adiv5_dp_write(dp, ADIV5_DP_CTRLSTAT, ADIV5_DP_CTRLSTAT_CSYSPWRUPREQ | ADIV5_DP_CTRLSTAT_CDBGPWRUPREQ);
 	/* Wait for acknowledge */
-	while (true) {
-		ctrlstat = adiv5_dp_read(dp, ADIV5_DP_CTRLSTAT);
-		const uint32_t status = ctrlstat & (ADIV5_DP_CTRLSTAT_CSYSPWRUPACK | ADIV5_DP_CTRLSTAT_CDBGPWRUPACK);
-		//DEBUG_INFO("status %08" PRIx32 " (%08" PRIx32 ")\n", ctrlstat, status);
+	status = 0U;
+	while (status != (ADIV5_DP_CTRLSTAT_CSYSPWRUPACK | ADIV5_DP_CTRLSTAT_CDBGPWRUPACK)) {
+		platform_delay(10);
+		status =
+			adiv5_dp_read(dp, ADIV5_DP_CTRLSTAT) & (ADIV5_DP_CTRLSTAT_CSYSPWRUPACK | ADIV5_DP_CTRLSTAT_CDBGPWRUPACK);
 		if (status == (ADIV5_DP_CTRLSTAT_CSYSPWRUPACK | ADIV5_DP_CTRLSTAT_CDBGPWRUPACK))
 			break;
 		if (platform_timeout_is_expired(&timeout)) {
-			DEBUG_WARN("DEBUG Power-Up failed\n");
+			DEBUG_WARN("adiv5: power-up failed\n");
 			free(dp); /* No AP that referenced this DP so long*/
 			return;
 		}
 	}
-	/* This AP reset logic is described in ADIv5, but fails to work
-	 * correctly on STM32.	CDBGRSTACK is never asserted, and we
-	 * just wait forever.  This scenario is described in B2.4.1
-	 * so we have a timeout mechanism in addition to the sensing one. */
-	platform_timeout_set(&timeout, 200U);
-	/* Write request for debug reset */
-	adiv5_dp_write(dp, ADIV5_DP_CTRLSTAT, ctrlstat | ADIV5_DP_CTRLSTAT_CDBGRSTREQ);
-	/* Wait for acknowledge */
-	while (true) {
-		ctrlstat = adiv5_dp_read(dp, ADIV5_DP_CTRLSTAT);
-		if (ctrlstat & ADIV5_DP_CTRLSTAT_CDBGRSTACK) {
-			DEBUG_INFO("RESET_SEQ succeeded\n");
-			break;
-		}
-		if (platform_timeout_is_expired(&timeout)) {
-			DEBUG_WARN("RESET_SEQ failed\n");
-			break;
-		}
-	}
-	/* Write request for debug reset release */
-	adiv5_dp_write(dp, ADIV5_DP_CTRLSTAT, ctrlstat & ~ADIV5_DP_CTRLSTAT_CDBGRSTREQ);
+	/* At this point due to the guaranteed power domain restart, the APs are all up and in their reset state. */
 
 	if (dp->target_designer_code == JEP106_MANUFACTURER_NXP)
 		lpc55_dp_prepare(dp);
@@ -961,7 +951,7 @@ void adiv5_dp_init(adiv5_debug_port_s *const dp, const uint32_t idcode)
 		lpc55_dmap_probe(ap);
 
 		/* Try to prepare the AP if it seems to be a AHB (memory) AP */
-		if (!ap->apsel && (ap->idr & 0xfU) == ARM_AP_TYPE_AHB) {
+		if (!ap->apsel && ADIV5_AP_IDR_CLASS(ap->idr) == 8U && ADIV5_AP_IDR_TYPE(ap->idr) == ARM_AP_TYPE_AHB3) {
 			if (!cortexm_prepare(ap))
 				DEBUG_WARN("adiv5: Failed to prepare AP, results may be unpredictable\n");
 		}
@@ -1034,7 +1024,7 @@ void *adiv5_unpack_data(void *const dest, const uint32_t src, const uint32_t dat
 	case ALIGN_DWORD:
 	case ALIGN_WORD:
 		/*
-		 * when using 32- or 64-bit alignment, we don't have to do anything special, just memcpy() the data to the
+		 * When using 32- or 64-bit alignment, we don't have to do anything special, just memcpy() the data to the
 		 * destination buffer (this avoids issues with unaligned writes and UB casts)
 		 */
 		memcpy(dest, &data, sizeof(data));

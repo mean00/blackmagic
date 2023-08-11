@@ -35,6 +35,8 @@
  * - https://www.st.com/resource/en/reference_manual/rm0440-stm32g4-series-advanced-armbased-32bit-mcus-stmicroelectronics.pdf
  * RM0438 STM32L552xx and STM32L562xx advanced Arm®-based 32-bit MCUs Rev 7
  * - https://www.st.com/resource/en/reference_manual/dm00346336-stm32l552xx-and-stm32l562xx-advanced-arm-based-32-bit-mcus-stmicroelectronics.pdf
+ * RM0456 STM32U5 Series Arm®-based 32-bit MCUs - Reference manual Rev 4
+ * - https://www.st.com/resource/en/reference_manual/rm0456-stm32u5-series-armbased-32bit-mcus-stmicroelectronics.pdf
  * RM0453 STM32WL5x advanced Arm®-based 32-bit MCUs with sub-GHz radio solution Rev 3
  * - https://www.st.com/resource/en/reference_manual/rm0453-stm32wl5x-advanced-armbased-32bit-mcus-with-subghz-radio-solution-stmicroelectronics.pdf
  * RM0461 STM32WLEx advanced Arm®-based 32-bit MCUs with sub-GHz radio solution Rev 5
@@ -166,6 +168,10 @@ typedef enum stm32l4_device_id {
 	 * which is ADIv5 DP register TARGETID in bank 2 from the ADIv5.2 spec §B2.2.10.
 	 * The references after the values are the sections to look at in the respective reference manuals.
 	 */
+	ID_STM32U535 = 0x4550U, /* STM32U535/545 from RM0456, Rev.4 $75.3.3 DP_TARGETIDR pg.3497 Not Tested */
+	ID_STM32U5FX = 0x4760U, /* STM32U5Fx/5Gx from RM0456, Rev.4 $75.3.3 DP_TARGETIDR pg.3497 Not Tested */
+	ID_STM32U59X = 0x4810U, /* STM32U59x/5Ax from RM0456, Rev.4 $75.3.3 DP_TARGETIDR pg.3497 Not Tested */
+	ID_STM32U575 = 0x4820U, /* STM32U575/585 from RM0456, Rev.4 $75.3.3 DP_TARGETIDR pg.3497 Tested on U575 */
 	ID_STM32WLXX = 0x4970U, /* from RM0461, Rev.5 §36.4.5, and RM0453, Rev.3 §38.4.5 */
 	ID_STM32WBXX = 0x4950U, /* from RM0434, Rev.10 §41.4.8 */
 	ID_STM32WB1X = 0x4940U, /* from RM0473, Rev.7 §33.4.8 and RM0478 Rev.5 §31.4.8 */
@@ -177,6 +183,7 @@ typedef enum stm32l4_family {
 	STM32L4_FAMILY_WBxx,
 	STM32L4_FAMILY_G4xx,
 	STM32L4_FAMILY_L55x,
+	STM32L4_FAMILY_U5xx,
 	STM32L4_FAMILY_WLxx,
 } stm32l4_family_e;
 
@@ -342,6 +349,38 @@ static stm32l4_device_info_s const stm32l4_device_info[] = {
 		.sram1 = 192U, /* SRAM1 and SRAM2 are mapped continuous */
 		.sram2 = 64U,
 		.flags = 2U,
+		.flash_regs_map = stm32l5_flash_regs_map,
+	},
+	{
+		.device_id = ID_STM32U535,
+		.family = STM32L4_FAMILY_U5xx,
+		.designator = "STM32U535/545",
+		.sram1 = 192U + 64U, /* SRAM1+2 continuous */
+		.flags = 2U | DUAL_BANK,
+		.flash_regs_map = stm32l5_flash_regs_map,
+	},
+	{
+		.device_id = ID_STM32U575,
+		.family = STM32L4_FAMILY_U5xx,
+		.designator = "STM32U575/585",
+		.sram1 = 192U + 64U + 512U, /* SRAM1+2+3 continuous */
+		.flags = 2U | DUAL_BANK,
+		.flash_regs_map = stm32l5_flash_regs_map,
+	},
+	{
+		.device_id = ID_STM32U59X,
+		.family = STM32L4_FAMILY_U5xx,
+		.designator = "STM32U59x/5Ax",
+		.sram1 = 786U + 64U + 832U + 832U, /* SRAM1+2+3+5 continuous */
+		.flags = 2U | DUAL_BANK,
+		.flash_regs_map = stm32l5_flash_regs_map,
+	},
+	{
+		.device_id = ID_STM32U5FX,
+		.family = STM32L4_FAMILY_U5xx,
+		.designator = "STM32U5Fx/5Gx",
+		.sram1 = 786U + 64U + 832U + 832U + 512U, /* SRAM1+2+3+5+6 continuous */
+		.flags = 2U | DUAL_BANK,
 		.flash_regs_map = stm32l5_flash_regs_map,
 	},
 	{
@@ -583,10 +622,10 @@ static bool stm32l4_attach(target_s *const t)
 	/* Free any previously built memory map */
 	target_mem_map_free(t);
 	/* And rebuild the RAM map */
-	if (device->family == STM32L4_FAMILY_L55x)
-		target_add_ram(t, 0x0a000000, device->sram1 + device->sram2);
+	if (device->family == STM32L4_FAMILY_L55x || device->family == STM32L4_FAMILY_U5xx)
+		target_add_ram(t, 0x0a000000, (device->sram1 + device->sram2) * 1024U);
 	else
-		target_add_ram(t, 0x10000000, device->sram2);
+		target_add_ram(t, 0x10000000, device->sram2 * 1024U);
 	target_add_ram(t, 0x20000000, stm32l4_main_sram_length(t));
 
 	const uint16_t flash_len = stm32l4_flash_read16(t, FLASHSIZE);
