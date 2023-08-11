@@ -1010,3 +1010,21 @@ static const char *riscv_target_description(target_s *const target)
 		(void)riscv_build_target_description(description, description_length, hart->address_width, hart->extensions);
 	return description;
 }
+
+/*
+	return the CSR we query, we have to add RV_CSR_OFFSET from gdb
+	csr fits in 16 bits , we extend it to 32 so that the offset is not a problem
+*/
+uint32_t riscv_list_csr(uint32_t start, uint32_t max_size, uint32_t *csr)
+{
+	uint32_t nb = 0, cur = start, limit = sizeof(riscv_csrs) / sizeof(riscv_csr_descriptor_s);
+	if (!csr)
+		return limit;
+
+	while (cur < limit && nb < max_size) {
+		*csr = riscv_csrs[cur].csr_number;
+		csr++;
+		cur++;
+	}
+	return nb;
+}
