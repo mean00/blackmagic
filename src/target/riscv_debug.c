@@ -36,7 +36,6 @@
 #include "target_internal.h"
 #include "gdb_reg.h"
 #include "riscv_debug.h"
-
 #include <assert.h>
 
 /*
@@ -987,7 +986,7 @@ static size_t riscv_build_target_description(
 	int nb_csr = sizeof(riscv_csrs) / sizeof(riscv_csr_descriptor_s);
 	for (int i = 0; i < nb_csr; i++) {
 		offset += snprintf(buffer + offset, print_size,
-			" <reg name=\"%s\" bitsize=\"%d\" type=\"int\" regnum=\"%d\" group=\"csr\" save-restore=\"no\"/>",
+			" <reg name=\"%s\" bitsize=\"%u\" type=\"int\" regnum=\"%" PRIu32 "\" group=\"csr\" save-restore=\"no\"/>",
 			riscv_csrs[i].name, address_width, riscv_csrs[i].csr_number + RV_CSR_GDB_OFFSET);
 	}
 	offset += snprintf(buffer + offset, print_size, "</feature>");
