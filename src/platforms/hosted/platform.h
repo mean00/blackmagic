@@ -53,6 +53,9 @@ void platform_buffer_flush(void);
 #define PRODUCT_ID_BMP_BL 0x6017U
 #define PRODUCT_ID_BMP    0x6018U
 
+#define VENDOR_ID_WCH      0x1a86
+#define PRODUCT_ID_WCHLINK 0x8010
+
 #define VENDOR_ID_STLINK           0x0483U
 #define PRODUCT_ID_STLINK_MASK     0xffe0U
 #define PRODUCT_ID_STLINK_GROUP    0x3740U
@@ -89,7 +92,8 @@ typedef enum bmp_type_e {
 	BMP_TYPE_STLINK_V2,
 	BMP_TYPE_FTDI,
 	BMP_TYPE_CMSIS_DAP,
-	BMP_TYPE_JLINK
+	BMP_TYPE_JLINK,
+	BMP_TYPE_WCHLINK
 } bmp_type_t;
 
 void gdb_ident(char *p, int count);

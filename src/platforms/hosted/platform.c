@@ -51,6 +51,7 @@
 #include "ftdi_bmp.h"
 #include "jlink.h"
 #include "cmsis_dap.h"
+#include "wchlink.h" // FX temporary hack
 #endif
 
 bmp_info_s info;
@@ -143,6 +144,12 @@ void platform_init(int argc, char **argv)
 		if (!jlink_init())
 			exit(1);
 		break;
+
+	case BMP_TYPE_WCHLINK:
+		if (!wchlink_init(&info))
+			exit(1);
+		break;
+
 #endif
 
 	default:
@@ -181,6 +188,22 @@ bool bmda_swd_scan(const uint32_t targetid)
 		return false;
 	}
 }
+#if HOSTED_BMP_ONLY == 0
+
+uint32_t bmp_rvswd_scan()
+{
+	info.is_jtag = false;
+
+	switch (info.bmp_type) {
+	case BMP_TYPE_WCHLINK:
+		return wchlink_rvswd_scan(&info);
+
+	default:
+		return 0;
+	}
+}
+
+#endif
 
 bool bmda_swd_dp_init(adiv5_debug_port_s *dp)
 {
@@ -326,6 +349,9 @@ char *bmda_adaptor_ident(void)
 	case BMP_TYPE_JLINK:
 		return "J-Link";
 
+	case BMP_TYPE_WCHLINK:
+		return "WCH-Link";
+
 	default:
 		return NULL;
 	}
@@ -346,6 +372,10 @@ const char *platform_target_voltage(void)
 
 	case BMP_TYPE_JLINK:
 		return jlink_target_voltage_string();
+
+	case BMP_TYPE_WCHLINK:
+		return wchlink_target_voltage(&info);
+
 #endif
 
 	default:
@@ -371,6 +401,10 @@ void platform_nrst_set_val(bool assert)
 
 	case BMP_TYPE_CMSIS_DAP:
 		return dap_nrst_set_val(assert);
+
+	case BMP_TYPE_WCHLINK:
+		return wchlink_nrst_set_val(&info, assert);
+
 #endif
 
 	default:
@@ -393,6 +427,10 @@ bool platform_nrst_get_val(void)
 
 	case BMP_TYPE_FTDI:
 		return ftdi_nrst_get_val();
+
+	case BMP_TYPE_WCHLINK:
+		return wchlink_nrst_get_val(&info);
+
 #endif
 
 	default:
