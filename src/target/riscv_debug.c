@@ -36,7 +36,6 @@
 #include "target_internal.h"
 #include "gdb_reg.h"
 #include "riscv_debug.h"
-
 #include <assert.h>
 
 /*
@@ -137,6 +136,29 @@ static const char *const riscv_gpr_names[RV_GPRS_COUNT] = {
 	"s8", "s9", "s10", "s11",
 	"t3", "t4", "t5", "t6",
 };
+
+typedef struct riscv_csr_descriptor riscv_csr_descriptor_s;
+
+struct riscv_csr_descriptor  {
+	const char *name;
+	const uint32_t   csr_number; // fits in 16 bytes actually (?)	
+};
+
+
+static const riscv_csr_descriptor_s riscv_csrs[]={	
+	{"mstatus",RV_CSR_STATUS},
+	{"misa",RV_CSR_MISA},
+	{"mie",	RV_CSR_MIE},
+	{"mtvec",	RV_CSR_MTVEC},
+	{"mscratch",RV_CSR_MSCRATCH},
+	{"mepc",	RV_CSR_MEPC},
+	{"mcause",RV_CSR_MCAUSE},
+	{"mtval",	RV_CSR_MTVAL},
+	{"mip",	RV_CSR_MIP},
+	
+	
+};
+
 // clang-format on
 
 /* General-purpose register types */
@@ -504,8 +526,15 @@ static uint32_t riscv_hart_discover_isa(riscv_hart_s *const hart)
 			return isa_data[0];
 		}
 		/* If that failed, then find out why and instead try the next narrower width */
-		if (hart->status != RISCV_HART_BUS_ERROR && hart->status != RISCV_HART_EXCEPTION)
+		switch (hart->status) {
+		case RISCV_HART_BUS_ERROR:
+		case RISCV_HART_EXCEPTION:
+		case RISCV_HART_NOT_SUPP: // WCH CH32Vx chips reply that
+			break;
+		default:
 			return 0;
+			break;
+		}
 		if (hart->access_width == 32U) {
 			hart->access_width = 0U;
 			return 0; /* We are unable to read the misa register */
@@ -646,7 +675,15 @@ static void riscv_hart_discover_triggers(riscv_hart_s *const hart)
 		riscv_csr_write(hart, RV_TRIG_SELECT | RV_CSR_FORCE_32_BIT, &trigger);
 		/* Try reading the trigger info */
 		uint32_t info = 0;
-		if (!riscv_csr_read(hart, RV_TRIG_INFO | RV_CSR_FORCE_32_BIT, &info)) {
+		bool alternate = false;
+		/* Some chips reply ok but returns 0 in the following call (WCH)*/
+		if (!riscv_csr_read(hart, RV_TRIG_INFO | RV_CSR_FORCE_32_BIT, &info))
+			alternate = true;
+		else {
+			if (!info)
+				alternate = true;
+		}
+		if (alternate) {
 			/*
 			 * If that fails, it's probably because the tinfo register isn't implemented, so read
 			 * the tdata1 register instead and extract the type from the MSb and build the info bitset from that
@@ -942,11 +979,22 @@ static size_t riscv_build_target_description(
 
 	/* XXX: TODO - implement generation of the FPU feature and registers */
 
+	/* Add main CSR registers*/
+	offset += snprintf(buffer + offset, print_size, "</feature>");
+
+	offset += snprintf(buffer + offset, print_size, "<feature name=\"org.gnu.gdb.riscv.csr\">");
+	int nb_csr = sizeof(riscv_csrs) / sizeof(riscv_csr_descriptor_s);
+	for (int i = 0; i < nb_csr; i++) {
+		offset += snprintf(buffer + offset, print_size,
+			" <reg name=\"%s\" bitsize=\"%u\" type=\"int\" regnum=\"%" PRIu32 "\" group=\"csr\" save-restore=\"no\"/>",
+			riscv_csrs[i].name, address_width, riscv_csrs[i].csr_number + RV_CSR_GDB_OFFSET);
+	}
+	offset += snprintf(buffer + offset, print_size, "</feature>");
 	/* Add the closing tags required */
 	if (max_length != 0)
 		print_size = max_length - (size_t)offset;
 
-	offset += snprintf(buffer + offset, print_size, "</feature></target>");
+	offset += snprintf(buffer + offset, print_size, "</target>");
 	/* offset is now the total length of the string created, discard the sign and return it. */
 	return (size_t)offset;
 }
@@ -960,4 +1008,22 @@ static const char *riscv_target_description(target_s *const target)
 	if (description)
 		(void)riscv_build_target_description(description, description_length, hart->address_width, hart->extensions);
 	return description;
+}
+
+/*
+	return the CSR we query, we have to add RV_CSR_OFFSET from gdb
+	csr fits in 16 bits , we extend it to 32 so that the offset is not a problem
+*/
+uint32_t riscv_list_csr(uint32_t start, uint32_t max_size, uint32_t *csr)
+{
+	uint32_t nb = 0, cur = start, limit = sizeof(riscv_csrs) / sizeof(riscv_csr_descriptor_s);
+	if (!csr)
+		return limit;
+
+	while (cur < limit && nb < max_size) {
+		*csr = riscv_csrs[cur].csr_number;
+		csr++;
+		cur++;
+	}
+	return nb;
 }

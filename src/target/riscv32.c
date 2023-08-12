@@ -67,8 +67,10 @@ typedef struct riscv32_regs {
 #define RV32_MATCH_BEFORE 0x00000000U
 #define RV32_MATCH_AFTER  0x00040000U
 
+static ssize_t riscv32_reg_read(target_s *target, int c, void *data, size_t max);
 static void riscv32_regs_read(target_s *target, void *data);
 static void riscv32_regs_write(target_s *target, const void *data);
+static ssize_t riscv32_reg_write(target_s *const target, int c, const void *data, size_t max);
 static void riscv32_mem_read(target_s *target, void *dest, target_addr_t src, size_t len);
 static void riscv32_mem_write(target_s *target, target_addr_t dest, const void *src, size_t len);
 
@@ -91,6 +93,8 @@ bool riscv32_probe(target_s *const target)
 	target->regs_size = sizeof(riscv32_regs_s);
 	target->regs_read = riscv32_regs_read;
 	target->regs_write = riscv32_regs_write;
+	target->reg_write = riscv32_reg_write;
+	target->reg_read = riscv32_reg_read;
 	target->mem_read = riscv32_mem_read;
 	target->mem_write = riscv32_mem_write;
 
@@ -101,6 +105,11 @@ bool riscv32_probe(target_s *const target)
 	case JEP106_MANUFACTURER_RV_GIGADEVICE:
 		PROBE(gd32vf1_probe);
 		break;
+#if 0
+	case JEP106_MANUFACTURER_WCH:
+		PROBE(ch32v3xx_probe);
+		break;
+#endif
 	}
 #if PC_HOSTED == 0
 	gdb_outf("Please report unknown device with Designer 0x%x\n", target->designer_code);
@@ -139,6 +148,45 @@ static void riscv32_regs_write(target_s *const target, const void *const data)
 	}
 	/* Special access to poke in the program counter that will be executed on resuming the hart */
 	riscv_csr_write(hart, RV_DPC, &regs->pc);
+}
+
+static ssize_t riscv32_bool_to_4(bool ret)
+{
+	if (ret)
+		return 4;
+	return -1;
+}
+
+static ssize_t riscv32_reg_read(target_s *target, int reg, void *data, size_t max)
+{
+	if (max < 4) {
+		return -1;
+	}
+	/* Grab the hart structure  */
+	riscv_hart_s *const hart = riscv_hart_struct(target);
+	if (reg < 32)
+		return riscv32_bool_to_4(riscv_csr_read(hart, RV_GPR_BASE + reg, data));
+	if (reg == 32)
+		return riscv32_bool_to_4(riscv_csr_read(hart, RV_DPC, data));
+	if (reg >= RV_CSR_GDB_OFFSET)
+		return riscv32_bool_to_4(riscv_csr_read(hart, reg - RV_CSR_GDB_OFFSET, data));
+	return -1;
+}
+
+static ssize_t riscv32_reg_write(target_s *const target, int reg, const void *data, size_t max)
+{
+	if (max != 4) {
+		return -1;
+	}
+	/* Grab the hart structure  */
+	riscv_hart_s *const hart = riscv_hart_struct(target);
+	if (reg < 32)
+		return riscv32_bool_to_4(riscv_csr_write(hart, RV_GPR_BASE + reg, data));
+	if (reg == 32)
+		return riscv32_bool_to_4(riscv_csr_write(hart, RV_DPC, data));
+	if (reg >= RV_CSR_GDB_OFFSET)
+		return riscv32_bool_to_4(riscv_csr_write(hart, reg - RV_CSR_GDB_OFFSET, data));
+	return -1;
 }
 
 /* Takes in data from abstract command arg0 and, based on the access width, unpacks it to dest */
