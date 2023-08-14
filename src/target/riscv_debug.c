@@ -878,13 +878,13 @@ static void riscv_reset(target_s *const target)
 		*/
 
 	if (!has_reset) {
-		riscv_dm_write(hart->dbg_module, RV_DM_CONTROL, hart->hartsel | RV_DM_CTRL_SYSTEM_RESET);
+		riscv_dm_write(hart->dbg_module, RV_DM_CONTROL, hart->hartsel | RV_DM_CTRL_SYSTEM_RESET | RV_DM_CTRL_HALT_REQ);
 		riscv_dm_poll_state(hart->dbg_module, RV_DM_STAT_ALL_RESET);
 		/* Complete the reset by resetting ndmreset */
-		riscv_dm_write(hart->dbg_module, RV_DM_CONTROL, hart->hartsel);
+		riscv_dm_write(hart->dbg_module, RV_DM_CONTROL, hart->hartsel | RV_DM_CTRL_HALT_REQ);
 	}
 	/* Acknowledge the reset */
-	riscv_dm_write(hart->dbg_module, RV_DM_CONTROL, hart->hartsel | RV_DM_CTRL_HART_ACK_RESET);
+	riscv_dm_write(hart->dbg_module, RV_DM_CONTROL, hart->hartsel | RV_DM_CTRL_HART_ACK_RESET | RV_DM_CTRL_HALT_REQ);
 	target_check_error(target);
 }
 
