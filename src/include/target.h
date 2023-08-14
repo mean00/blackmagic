@@ -36,6 +36,7 @@ typedef struct target_controller target_controller_s;
 
 #if PC_HOSTED == 1
 bool bmda_swd_scan(uint32_t targetid);
+uint32_t bmp_rvswd_scan(void);
 bool bmda_jtag_scan(void);
 #endif
 bool adiv5_swd_scan(uint32_t targetid);
